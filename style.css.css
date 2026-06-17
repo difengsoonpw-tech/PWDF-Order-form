@@ -1,0 +1,232 @@
+body { font-family: Arial, sans-serif; margin:0; background:#f4f4f4; }
+header { background:#ffffff; padding:12px 20px; font-size:22px; font-weight:700; position:sticky; top:0; z-index:999; border-bottom:1px solid #ddd; }
+.container { padding: 12px; max-width:1100px; margin:0 auto; }
+.category { padding: 12px 0; }
+.category-title { font-size:18px; font-weight:700; margin:8px 0; }
+.item-card { background:#fff; padding:12px; border-radius:12px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,0.06); display:grid; grid-template-columns:1fr 160px; gap:10px; align-items:center; }
+.item-name { font-size:14px; font-weight:600; margin-bottom:6px; }
+.item-meta { font-size:12px; color:#666; }
+.controls { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+.qty-box { width:72px; padding:6px; border-radius:8px; border:1px solid #ccc; }
+.add-btn { background:#1678ff; color:#fff; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; }
+.summary-btn { background:#ff6a00; color:white; padding:10px 18px; border:none; border-radius:10px; cursor:pointer; }
+#summaryPanel { position:fixed; bottom:0; width:100%; background:#fff; padding:12px 16px; border-top:1px solid #eee; display:flex; justify-content:space-between; box-shadow:0 -4px 12px rgba(0,0,0,0.04); }
+#summaryPopup { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:2000; }
+.summary-box { background:#fff; width:92%; max-width:720px; padding:18px; border-radius:12px; max-height:80vh; overflow:auto; }
+.policy-box { background:#fff7e6; border:1px solid #ffd89e; border-radius:10px; padding:14px 16px; margin-bottom:18px; color:#333; }
+.policy-box strong { display:block; margin-bottom:8px; }
+.policy-box p { margin:6px 0; line-height:1.5; }
+.close-btn { background:#444; color:#fff; padding:6px 10px; border:none; border-radius:8px; }
+textarea#summaryText { width:100%; height:300px; padding:10px; border-radius:8px; border:1px solid #ddd; }
+
+/* === Added for dropdown headers, customer form, and buttons === */
+.dropdown-header { cursor: pointer; padding:10px; background:#f4f4f4; border:1px solid #ddd; border-radius:8px; }
+.dropdown-header.active { background:#e9f0ff; }
+.dropdown-content { display:none; padding:10px; background:#fff; border:1px solid #eee; border-radius:8px; margin-top:8px; }
+.dropdown-header.active + .dropdown-content { display:block; }
+.form-field { margin-bottom:10px; }
+.form-field input { width:100%; padding:8px; border:1px solid #ccc; border-radius:8px; }
+.btn { padding:8px 12px; border:1px solid #333; background:#fff; border-radius:8px; cursor:pointer; }
+.btn-primary { background:#1678ff; color:#fff; border:none; }
+.order-guide {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 16px;
+  color: #444;
+}
+
+.order-guide h3 {
+  margin-top: 0;
+  font-size: 16px;
+}
+
+.order-guide ol {
+  padding-left: 18px;
+  margin: 10px 0;
+}
+
+.order-guide li {
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.guide-note {
+  font-size: 12px;
+  color: #777;
+  margin-top: 8px;
+}
+#orderGuide {
+  display: none;
+}
+#menuContainer {
+  display: none;
+}
+body.search-active #menuContainer {
+  display: block;
+}
+/* ===== BOTTOM SUMMARY BAR (IMPROVED) ===== */
+#summaryPanel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border-top: 1px solid #ddd;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+}
+
+.summary-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-count {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.summary-hint {
+  font-size: 12px;
+  color: #777;
+}
+
+.summary-btn {
+  background: #ff6a00;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+/* Mobile touch comfort */
+@media (max-width: 600px) {
+  .summary-btn {
+    min-height: 48px;
+    font-size: 16px;
+  }
+}
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.confirm-box {
+  background: #fff;
+  width: 92%;
+  max-width: 420px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  overflow: hidden;
+  text-align: center;
+}
+
+.confirm-logo {
+  padding: 16px 0 8px;
+}
+
+.confirm-logo img {
+  height: 40px;
+  max-width: 180px;
+  object-fit: contain;
+}
+
+.confirm-header {
+  font-size: 16px;
+  font-weight: 600;
+  padding-bottom: 8px;
+}
+
+.confirm-body {
+  padding: 0 16px 12px;
+  font-size: 14px;
+  color: #333;
+}
+
+.confirm-lock {
+  font-size: 13px;
+  color: #555;
+}
+
+.confirm-info {
+  margin-top: 10px;
+}
+
+.confirm-support {
+  font-size: 12px;
+  color: #777;
+  margin-top: 10px;
+}
+
+.confirm-actions {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-primary {
+  background: #25d366;
+  color: #fff;
+  border: none;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.btn-secondary {
+  background: #007bff;
+  color: #fff;
+  border: none;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  padding: 6px;
+}
+#orderConfirm {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  padding: 20px;
+  z-index: 9999;
+  overflow-y: auto;
+}
+
+#orderConfirm h3 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+#orderConfirm h4 {
+  margin-top: 4px;
+  font-size: 16px;
+}
+
+#orderConfirm p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#orderConfirm button {
+  margin-right: 6px;
+  padding: 6px 12px;
+}
