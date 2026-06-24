@@ -798,22 +798,22 @@ async function submitWhatsApp() {
   const t = buildText();
   if (!t) return;
 
+  // Open WhatsApp FIRST
+  const waWindow = window.open(
+    `https://wa.me/?text=${encodeURIComponent(t)}`,
+    "_blank"
+  );
+
   try {
     await saveOrderToGoogleSheet();
 
     alert("Order saved successfully.");
 
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(t)}`,
-      "_blank"
-    );
-
   } catch (err) {
+
     console.error(err);
 
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(t)}`,
-      "_blank"
-    );
+    alert("Order sent to WhatsApp but failed to save.");
+
   }
 }
