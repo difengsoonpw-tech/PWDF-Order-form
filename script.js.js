@@ -28,6 +28,10 @@ Do you want to proceed?`;
    (Customer never sees prices)
    ========================================= */
 
+ const API_URL =
+"https://script.google.com/macros/s/AKfycbytfrFpyZJXRWMFzExnwphN2Y4a-lj_2SjYltpsCGwDuKc0w_8yEI2wzwDX62wpo43h/exec";  
+
+
 const PRICE_MAP = {
 
   /* ===== BREAD ===== */
@@ -755,9 +759,50 @@ ${ORDER_POLICY_TEXT}`;
   return text;
 }
 
-function submitWhatsApp() {
-  const t = buildText();
-  if (t) window.open(`https://wa.me/?text=${encodeURIComponent(t)}`);
+async function submitWhatsApp() {
+
+  try {
+
+    const result = await saveOrderToGoogleSheet();
+
+    if (!result.success) {
+      alert("Failed to save order.");
+      return;
+    }
+
+    const poNo = result.poNo;
+
+    let message =
+`PO NO: ${poNo}
+
+Customer: ${customerName.value}
+Brand: ${brandName.value}
+Contact: ${contactNumber.value}
+
+`;
+
+    CART.forEach(item => {
+      message +=
+`${item.qty} x ${item.item}
+`;
+    });
+
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(message)}`
+    );
+
+    alert(`Order saved successfully.\nPO No: ${poNo}`);
+
+  } catch (err) {
+
+    console.error(err);
+
+    alert(
+      "Error connecting to database."
+    );
+
+  }
+
 }
 
 function submitEmail() {
@@ -769,4 +814,28 @@ function closeSummary() {
   summaryPopup.style.display = "none";
   document.body.style.overflow = "auto";
 }
+async function saveOrderToGoogleSheet() {
 
+  const payload = {
+    customer: customerName.value,
+    brandName: brandName.value,
+    contact: contactNumber.value,
+    items: CART.map(item => ({
+      code: item.item.split(" ")[0],
+      name: item.item,
+      remark:
+        `${item.choice || ""} ${item.addon || ""}`.trim(),
+      qty: item.qty
+    }))
+  };
+
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return await response.json();
+}
