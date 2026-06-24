@@ -758,30 +758,7 @@ ${ORDER_POLICY_TEXT}`;
 
   return text;
 }
-async function saveOrderToGoogleSheet() {
 
-  const payload = {
-    customer: customerName.value,
-    brandName: brandName.value,
-    contact: contactNumber.value,
-
-    items: CART.map(item => ({
-      code: item.item.split(" ")[0],
-      name: item.item,
-      remark:
-        `${item.choice || ""} ${item.addon || ""}`.trim(),
-      qty: item.qty
-    }))
-  };
-
-  await fetch(API_URL, {
-    method: "POST",
-    mode: "no-cors",
-    body: JSON.stringify(payload)
-  });
-
-  return true;
-}
 
 
 function submitEmail() {
@@ -815,4 +792,28 @@ async function saveOrderToGoogleSheet() {
   });
 
   return true;
+}
+async function submitWhatsApp() {
+
+  const t = buildText();
+  if (!t) return;
+
+  try {
+    await saveOrderToGoogleSheet();
+
+    alert("Order saved successfully.");
+
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(t)}`,
+      "_blank"
+    );
+
+  } catch (err) {
+    console.error(err);
+
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(t)}`,
+      "_blank"
+    );
+  }
 }
