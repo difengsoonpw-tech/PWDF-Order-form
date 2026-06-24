@@ -758,52 +758,31 @@ ${ORDER_POLICY_TEXT}`;
 
   return text;
 }
+async function saveOrderToGoogleSheet() {
 
-async function submitWhatsApp() {
+  const payload = {
+    customer: customerName.value,
+    brandName: brandName.value,
+    contact: contactNumber.value,
 
-  try {
+    items: CART.map(item => ({
+      code: item.item.split(" ")[0],
+      name: item.item,
+      remark:
+        `${item.choice || ""} ${item.addon || ""}`.trim(),
+      qty: item.qty
+    }))
+  };
 
-    const result = await saveOrderToGoogleSheet();
+  await fetch(API_URL, {
+    method: "POST",
+    mode: "no-cors",
+    body: JSON.stringify(payload)
+  });
 
-    if (!result.success) {
-      alert("Failed to save order.");
-      return;
-    }
-
-    const poNo = result.poNo;
-
-    let message =
-`PO NO: ${poNo}
-
-Customer: ${customerName.value}
-Brand: ${brandName.value}
-Contact: ${contactNumber.value}
-
-`;
-
-    CART.forEach(item => {
-      message +=
-`${item.qty} x ${item.item}
-`;
-    });
-
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(message)}`
-    );
-
-    alert(`Order saved successfully.\nPO No: ${poNo}`);
-
-  } catch (err) {
-
-    console.error(err);
-
-    alert(
-      "Error connecting to database."
-    );
-
-  }
-
+  return true;
 }
+
 
 function submitEmail() {
   const t = buildText();
@@ -820,22 +799,20 @@ async function saveOrderToGoogleSheet() {
     customer: customerName.value,
     brandName: brandName.value,
     contact: contactNumber.value,
+
     items: CART.map(item => ({
       code: item.item.split(" ")[0],
       name: item.item,
-      remark:
-        `${item.choice || ""} ${item.addon || ""}`.trim(),
+      remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
       qty: item.qty
     }))
   };
 
-  const response = await fetch(API_URL, {
+  await fetch(API_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    mode: "no-cors",
     body: JSON.stringify(payload)
   });
 
-  return await response.json();
+  return true;
 }
