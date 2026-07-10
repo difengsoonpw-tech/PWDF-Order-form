@@ -491,6 +491,12 @@ function updateCounts() {
 function addToCart(item, qty, choice, category, btn) {
   let addon = "";
 
+  // If choice not provided (some products include choice in the name),
+  // infer "1 SIDED" or "2 SIDED" from the item name so pricing works.
+  if (!choice) {
+    const m = item.match(/\b(1 SIDED|2 SIDED)\b/);
+    if (m) choice = m[1];
+  }
   if (
     (category === "BLOCK CAKE" && choice.includes("45")) ||
     (category === "SLAB CAKE" && choice.includes("90"))
