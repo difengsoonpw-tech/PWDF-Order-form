@@ -23,6 +23,10 @@ This order is considered CONFIRMED upon submission.
 • No changes will be accepted once the order has been submitted.
 
 Do you want to proceed?`;
+
+function goHome() {
+  window.location.href = "index.html";
+}
 /* =========================================
    🔒 SELLER ONLY PRICE MAP
    (Customer never sees prices)
@@ -79,7 +83,6 @@ const PRICE_MAP = {
   "CAKE-CR10-S0004": 94.50,
   "CAKE-CR10-A0001": 103.95,
   "CAKE-CR10-C0007": 103.95,
-  "CAKE-CR10-F0001": 103.95,
   "CAKE-CR10-R0002": 103.95,
   "CAKE-CR10-R0005": 103.95,
   "CAKE-CR10-S0001": 103.95,

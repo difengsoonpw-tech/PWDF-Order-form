@@ -49,10 +49,16 @@ header {
   border-bottom: 1px solid rgba(255,215,0,0.18);
   z-index: 1200;
 }
+header a {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
 header .brand-logo {
   height: 28px;
   max-height: 28px;
   object-fit: contain;
+  cursor: pointer;
 }
 .container {
   max-width: 1100px;
@@ -408,7 +414,9 @@ body.search-active #menuContainer {
 <body>
 
 <header>
-  <img src="logo.png" alt="Pastry World" class="brand-logo">
+  <a href="index.html" onclick="goHome(); return false;" aria-label="Go to home page">
+    <img src="logo.png" alt="Pastry World" class="brand-logo">
+  </a>
   <span style="margin-left:auto;">
     Items: <span id="cartCount">0</span>
   </span>
