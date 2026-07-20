@@ -148,28 +148,6 @@ body.search-active #menuContainer {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-}
-
-#reviewBtnSection {
-  display: flex !important;
-  gap: 8px;
-  align-items: center;
-}
-
-#actionBtnSection {
-  display: none;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-#actionBtnSection.show {
-  display: flex !important;
-}
-
-#reviewBtnSection.hide {
-  display: none !important;
 }
 
 #summaryPanel .summary-count,
@@ -374,11 +352,6 @@ body.search-active #menuContainer {
   #searchBar { top: 36px; padding: 6px 0; }
   #smartSearchInput { padding: 6px 10px; font-size: 12px; }
   #summaryPanel { position: fixed; bottom: 0; top: auto; z-index: 1100; padding: 8px 10px; }
-  #summaryPanel .summary-info { flex-direction: column; align-items: flex-start; }
-  #summaryPanel .summary-left { width: 100%; }
-  #reviewBtnSection { width: 100%; }
-  #actionBtnSection { width: 100%; justify-content: space-between; }
-  #actionBtnSection button { flex: 1; min-width: 80px; }
   #menuContainer { padding: 6px; padding-top: 50px; padding-bottom: 140px; grid-template-columns: repeat(2, 1fr); gap: 6px; }
   .item-card { min-height: 150px; padding: 6px; gap: 5px; }
   .item-card .product-layout-photo { min-height: 100px; aspect-ratio: 1; }
@@ -397,11 +370,6 @@ body.search-active #menuContainer {
 @media (max-width: 420px) {
   body { padding-top: 80px; }
   #summaryPanel { padding: 6px 8px; }
-  #summaryPanel .summary-info { flex-direction: column; align-items: flex-start; }
-  #summaryPanel .summary-left { width: 100%; }
-  #reviewBtnSection { width: 100%; }
-  #actionBtnSection { width: 100%; }
-  #actionBtnSection button { flex: 1; min-width: 70px; font-size: 11px; padding: 6px 10px; }
   #menuContainer { padding: 6px; padding-top: 45px; padding-bottom: 55px; gap: 6px; }
   .item-card { min-height: 150px; padding: 6px; gap: 4px; }
   .item-card .product-layout-photo { min-height: 90px; }
@@ -448,16 +416,9 @@ body.search-active #menuContainer {
       <div class="summary-count">
         Items: <span id="cartCountBottom">0</span>
       </div>
-      <div id="reviewBtnSection" style="display: flex; gap: 8px; align-items: center;">
-        <button id="submitOrderBtn" class="summary-btn" onclick="openOrderReview()">
-          Review & Submit
-        </button>
-      </div>
-      <div id="actionBtnSection" style="display: none; flex-wrap: wrap; gap: 8px; align-items: center;">
-        <button onclick="submitWhatsApp()" class="summary-btn">WhatsApp</button>
-        <button onclick="submitEmail()" class="summary-btn">Email</button>
-        <button onclick="closeReview()" class="summary-btn">Close</button>
-      </div>
+      <button id="submitOrderBtn" class="summary-btn" onclick="openOrderReview()">
+        Review & Submit
+      </button>
     </div>
     <div class="summary-hint" id="reviewHint">
       Review order before submitting

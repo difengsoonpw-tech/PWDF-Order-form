@@ -649,10 +649,9 @@ function openOrderReview() {
     return;
   }
   renderCart();
-  // Show action buttons and hide review button
-  document.getElementById("reviewBtnSection").classList.add("hide");
-  document.getElementById("actionBtnSection").classList.add("show");
-  document.getElementById("reviewHint").style.display = "none";
+  // Show the modal popup with customer details
+  summaryPopup.style.display = "flex";
+  document.body.style.overflow = "hidden";
 }
 
 submitOrderBtn.onclick = openOrderReview;
@@ -780,13 +779,6 @@ function submitEmail() {
 function closeSummary() {
   summaryPopup.style.display = "none";
   document.body.style.overflow = "auto";
-}
-
-function closeReview() {
-  // Hide action buttons and show review button
-  document.getElementById("reviewBtnSection").classList.remove("hide");
-  document.getElementById("actionBtnSection").classList.remove("show");
-  document.getElementById("reviewHint").style.display = "block";
 }
 async function saveOrderToGoogleSheet() {
 
