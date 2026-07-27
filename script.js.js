@@ -36,6 +36,22 @@ function goHome() {
 "https://script.google.com/macros/s/AKfycbytfrFpyZJXRWMFzExnwphN2Y4a-lj_2SjYltpsCGwDuKc0w_8yEI2wzwDX62wpo43h/exec";  
 
 
+function getCatalogCategoryOptions() {
+  const options = [{ value: "all", label: "All Categories" }];
+  const categories = Object.keys(PRODUCTS || {});
+
+  categories.forEach(category => {
+    options.push({ value: category, label: category });
+  });
+
+  return options;
+}
+
+function matchesSelectedCategory(category, selectedCategory) {
+  if (selectedCategory === "all") return true;
+  return category === selectedCategory;
+}
+
 const PRICE_MAP = {
 
   /* ===== BREAD ===== */
@@ -77,7 +93,7 @@ const PRICE_MAP = {
   "BREAD-BL-G0008": 79.20,
   "BREAD-BL-G0009": 79.20,
 
-  /* ===== WHOLE CAKE ===== */
+  /* ===== 9 & 10" INCH CAKE ===== */
   "CAKE-CR10-A0003": 78.75,
   "CAKE-CR10-C0014": 80.85,
   "CAKE-CR10-S0004": 94.50,
@@ -483,6 +499,7 @@ const cartCount = document.getElementById("cartCount");
 const cartCountBottom = document.getElementById("cartCountBottom");
 const smartSearchInput = document.getElementById("smartSearchInput");
 const menuContainer = document.getElementById("menuContainer");
+const categoryFilter = document.getElementById("priceMapCategoryFilter");
 
 // Ensure button is clickable
 if (submitOrderBtn) {
@@ -571,10 +588,25 @@ function handleProductImageError(img) {
     img.style.display = "none";
   }
 }
+function populateCategoryFilter() {
+  if (!categoryFilter) return;
+
+  categoryFilter.innerHTML = "";
+  getCatalogCategoryOptions().forEach(section => {
+    const option = document.createElement("option");
+    option.value = section.value;
+    option.textContent = section.label;
+    categoryFilter.appendChild(option);
+  });
+  categoryFilter.value = "all";
+}
+
 function renderMenu(keyword = "") {
   menuContainer.innerHTML = "";
   keyword = keyword.trim().toLowerCase();
-  if (!keyword) return;
+  const selectedCategory = categoryFilter?.value || "all";
+  const hasQuery = keyword !== "" || selectedCategory !== "all";
+  if (!hasQuery) return;
 
   const matches = [];
   const blockedProducts = new Set(["CAKE-CR10-F0001"]);
@@ -582,8 +614,9 @@ function renderMenu(keyword = "") {
     PRODUCTS[category].forEach(p => {
       const code = (p.name || "").split(" ")[0] || "";
       if (blockedProducts.has(code)) return;
+      if (!matchesSelectedCategory(category, selectedCategory)) return;
       const text = (p.name + p.choice + p.addon).toLowerCase();
-      if (!text.includes(keyword)) return;
+      if (keyword && !text.includes(keyword)) return;
       matches.push({ category, item: p });
     });
   });
@@ -645,12 +678,25 @@ function renderMenu(keyword = "") {
   });
 }
 
-smartSearchInput.oninput = e => {
-  const guide = document.getElementById("orderGuide");
-  if (guide) guide.style.display = "none";
-  document.body.classList.toggle("search-active", !!e.target.value.trim());
-  renderMenu(e.target.value);
-};
+populateCategoryFilter();
+
+if (smartSearchInput) {
+  smartSearchInput.oninput = e => {
+    const guide = document.getElementById("orderGuide");
+    if (guide) guide.style.display = "none";
+    document.body.classList.toggle("search-active", !!(e.target.value.trim() || categoryFilter?.value !== "all"));
+    renderMenu(e.target.value);
+  };
+}
+
+if (categoryFilter) {
+  categoryFilter.onchange = () => {
+    const guide = document.getElementById("orderGuide");
+    if (guide) guide.style.display = "none";
+    document.body.classList.toggle("search-active", !!(smartSearchInput?.value.trim() || categoryFilter.value !== "all"));
+    renderMenu(smartSearchInput?.value || "");
+  };
+}
 
 /* CART POPUP */
 function openOrderReview() {

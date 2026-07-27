@@ -82,6 +82,14 @@ header .brand-logo {
   display: flex;
   justify-content: center;
 }
+.search-controls {
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 @media (max-width: 600px) {
   #searchBar {
     position: fixed;
@@ -90,8 +98,19 @@ header .brand-logo {
 }
 
 #smartSearchInput {
+  flex: 1 1 260px;
   width: 100%;
-  max-width: 800px;
+  max-width: none;
+  padding: 10px 14px;
+  font-size: 13px;
+  border: 1px solid rgba(212,169,44,0.35);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.64);
+  color: #f4e5b8;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+}
+.category-filter {
+  flex: 0 0 180px;
   padding: 10px 14px;
   font-size: 13px;
   border: 1px solid rgba(212,169,44,0.35);
@@ -392,7 +411,12 @@ body.search-active #menuContainer {
 
 <div id="searchBar">
   <div class="container">
-    <input id="smartSearchInput" placeholder="Search name / code / flavour…">
+    <div class="search-controls">
+      <input id="smartSearchInput" placeholder="Search name / code / flavour…">
+      <select id="priceMapCategoryFilter" class="category-filter">
+        <option value="all">All Categories</option>
+      </select>
+    </div>
   </div>
 </div>
 
