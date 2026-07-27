@@ -110,9 +110,9 @@ const PRICE_MAP = {
   "CAKE-CR8-M0033": 71.40,
   "CAKE-CR8-C0007": 73.50,
   "CAKE-CR8-C0009": 73.50,
-  "CAKE-CR8-F0001": 73.50,
   "CAKE-CR8-P0027": 73.50,
   "CAKE-CR8-S0001": 74.55,
+  "CAKE-CR8-F0001": 78.75,
   "CAKE-CR8-N0002": 75.60,
   "CAKE-CR8-R0016": 75.60,
   "CAKE-CR8-B0003": 78.75,
@@ -484,6 +484,13 @@ const cartCountBottom = document.getElementById("cartCountBottom");
 const smartSearchInput = document.getElementById("smartSearchInput");
 const menuContainer = document.getElementById("menuContainer");
 
+// Ensure button is clickable
+if (submitOrderBtn) {
+  submitOrderBtn.onclick = openOrderReview;
+} else {
+  console.warn("submitOrderBtn not found in DOM");
+}
+
 function updateCounts() {
   const total = CART.reduce((s, i) => s + i.qty, 0);
   cartCount.textContent = total;
@@ -570,8 +577,11 @@ function renderMenu(keyword = "") {
   if (!keyword) return;
 
   const matches = [];
+  const blockedProducts = new Set(["CAKE-CR10-F0001"]);
   Object.keys(PRODUCTS).forEach(category => {
     PRODUCTS[category].forEach(p => {
+      const code = (p.name || "").split(" ")[0] || "";
+      if (blockedProducts.has(code)) return;
       const text = (p.name + p.choice + p.addon).toLowerCase();
       if (!text.includes(keyword)) return;
       matches.push({ category, item: p });
