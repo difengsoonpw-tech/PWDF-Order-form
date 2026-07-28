@@ -233,11 +233,6 @@ const PRODUCTS = {
       "addon": ""
     },
     {
-      "name": "CAKE-CR10-N0005 10\" NUTELLA CHEESE CAKE UNIT 12",
-      "choice": "UNCUT / CUT",
-      "addon": ""
-    },
-    {
       "name": "CAKE-CR10-S0002 10\" SALTED CARAMEL MACADAMIA CHEESE CAKE *(h)4.5cm+/- UNIT 12",
       "choice": "UNCUT / CUT",
       "addon": ""
