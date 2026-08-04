@@ -1,4 +1,4 @@
-const PRODUCTS = {
+PRODUCTS = {
   "BREAD": [
     {
       "name": "BREAD-BG-B0004 BRIOCHE BURGER BUN 60GM+/- (NO SESAME) x 54PCS",
@@ -676,11 +676,7 @@ const PRODUCTS = {
       "choice": "",
       "addon": ""
     },
-    {
-      "name": "DONUT-P0012 MINI PLAIN DONUT (20GM+/-) x 120PCS",
-      "choice": "",
-      "addon": ""
-    },
+  
     {
       "name": "DONUT-C0002 4\" DARK CHOCOLATE KUNAFA DONUT 80GM+/- x 16PCS",
       "choice": "",
@@ -700,7 +696,24 @@ const PRODUCTS = {
       "name": "DONUT-T0001 4\" TIRAMISU DONUT 80GM+/- x 16PCS",
       "choice": "",
       "addon": ""
+    },
+    {
+      "name": "DONUT-P0013 4\" MINI DONUT 20GM+/- x 90PCS",
+      "choice": "",
+      "addon": ""
     }
+  
+
+    
+  ],
+  "INDIVIDUAL CAKE": [
+    {
+      "name": "CAKE-IL-C0002 CARAMELIS CHOCOLATE CAKE *(h)3.5cm+/- BOX-6 100GM+/-",
+      "choice": "",
+      "addon": ""
+    }
+
+    
   ],
   "INDIVIDUAL CAKE": [
     {
