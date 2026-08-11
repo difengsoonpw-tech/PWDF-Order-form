@@ -63,15 +63,40 @@ async function loadDraftOrders() {
 async function handleSearch() {
   const query = searchInput.value.trim();
   if (!query) {
-    alert("Enter an order reference, customer name, company or delivery date.");
+    alert("Enter an order reference.");
     return;
   }
+  console.log("Searching orders for", query);
   searchResults.innerHTML = "<p>Searching orders…</p>";
-  const orders = await searchOrders(query) || [];
-  renderSearchResults(orders);
+
+  let orders = [];
+  const orderRefPattern = /^PWDF-\d{8}-\d{3}$/i;
+  if (orderRefPattern.test(query)) {
+    const order = await fetchOrder(query);
+    if (order) {
+      orders = [order];
+    }
+  }
+
+  let apiError = null;
+  if (!orders.length) {
+    const searchResultsData = await searchOrders(query);
+    if (Array.isArray(searchResultsData)) {
+      orders = searchResultsData.filter(order => order && (order.orderRef || order.OrderRef));
+    } else {
+      apiError = searchResultsData.error || "Search failed";
+    }
+  }
+
+  console.log("Search result", orders, apiError);
+  renderSearchResults(orders, apiError);
 }
 
-function renderSearchResults(orders) {
+function renderSearchResults(orders, apiError) {
+  if ((!orders || !orders.length) && apiError) {
+    searchResults.innerHTML = `<p>Error searching orders: ${apiError}</p>`;
+    return;
+  }
   if (!orders || !orders.length) {
     searchResults.innerHTML = "<p>No matching orders found.</p>";
     return;

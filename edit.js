@@ -43,6 +43,7 @@ async function loadOrderForEditing() {
     return;
   }
   existingOrder = order;
+  CURRENT_ORDER_REF = order.orderRef || order.OrderRef || orderRef;
   populateOrderHeader(order);
   populateCustomerFields(order);
   CART = parseOrderCart(order);
@@ -52,20 +53,29 @@ async function loadOrderForEditing() {
 }
 
 function parseOrderCart(order) {
-  const json = order.orderJson || order.OrderJson || order.orderJson || "[]";
-  try {
-    const items = typeof json === "string" ? JSON.parse(json) : json;
-    return items.map(item => ({
-      item: item.name || "",
-      qty: Number(item.qty) || 1,
-      choice: item.choice || item.remark || "",
-      addon: item.addon || "",
-      category: item.category || ""
-    }));
-  } catch (err) {
-    console.warn("Invalid order JSON", err);
+  const itemsSource = order.items || order.Items || order.orderJson || order.OrderJson || "[]";
+  let items = itemsSource;
+
+  if (typeof itemsSource === "string") {
+    try {
+      items = JSON.parse(itemsSource);
+    } catch (err) {
+      console.warn("Invalid order JSON", err);
+      items = [];
+    }
+  }
+
+  if (!Array.isArray(items)) {
     return [];
   }
+
+  return items.map(item => ({
+    item: item.name || item.item || "",
+    qty: Number(item.qty) || 1,
+    choice: item.choice || item.remark || "",
+    addon: item.addon || "",
+    category: item.category || ""
+  }));
 }
 
 async function saveDraftOrder() {
@@ -108,6 +118,70 @@ async function confirmOrderEdit() {
 
 saveDraftBtn?.addEventListener("click", saveDraftOrder);
 confirmOrderBtn?.addEventListener("click", confirmOrderEdit);
+
+const resubmitBtn = document.getElementById("resubmitBtn");
+resubmitBtn?.addEventListener("click", resubmitOrder);
+
+async function resubmitOrder() {
+  if (!existingOrder) {
+    alert("No order loaded to resubmit.");
+    return;
+  }
+
+  // Open chooser modal
+  const popup = document.getElementById("resubmitPopup");
+  if (!popup) {
+    // fallback: directly save and open review
+    await saveOrderToGoogleSheet();
+    openOrderReview();
+    return;
+  }
+  popup.style.display = "flex";
+
+  // hook buttons
+  const waBtn = document.getElementById("resubmitWhatsAppBtn");
+  const emailBtn = document.getElementById("resubmitEmailBtn");
+  const cancelBtn = document.getElementById("resubmitCancelBtn");
+
+  const cleanup = () => {
+    popup.style.display = "none";
+    waBtn.removeEventListener("click", onWa);
+    emailBtn.removeEventListener("click", onEmail);
+    cancelBtn.removeEventListener("click", onCancel);
+  };
+
+  const onCancel = () => cleanup();
+
+  const onWa = async () => {
+    try {
+      await saveOrderToGoogleSheet();
+      const t = buildText();
+      if (t) window.open(`https://wa.me/?text=${encodeURIComponent(t)}`, "_blank");
+      alert("Order saved and opened in WhatsApp.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save order before WhatsApp.");
+    }
+    cleanup();
+  };
+
+  const onEmail = async () => {
+    try {
+      await saveOrderToGoogleSheet();
+      const t = buildText();
+      if (t) window.location.href = `mailto:?subject=Order ${encodeURIComponent(existingOrder.orderRef || existingOrder.OrderRef || '')}&body=${encodeURIComponent(t)}`;
+      alert("Order saved and email composer opened.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save order before opening email.");
+    }
+    cleanup();
+  };
+
+  waBtn.addEventListener("click", onWa);
+  emailBtn.addEventListener("click", onEmail);
+  cancelBtn.addEventListener("click", onCancel);
+}
 
 function logoutStaff() {
   sessionStorage.removeItem("pwdfStaffAuth");

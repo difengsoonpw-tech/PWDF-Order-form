@@ -58,6 +58,7 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     <div class="action-row">
       <button id="saveDraftBtn" class="primary">Save Draft</button>
       <button id="confirmOrderBtn" class="primary">Confirm Order</button>
+      <button id="resubmitBtn" class="primary">Resubmit Order</button>
       <button onclick="location.href='staff.html'" class="secondary">Back to Dashboard</button>
     </div>
   </div>
@@ -95,7 +96,25 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     <h3>Cart</h3>
     <div id="popupSummary"></div>
     <br>
-    <button onclick="closeSummary()" class="summary-btn">Close</button>
+    <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:12px;">
+      <button onclick="submitWhatsApp()" class="summary-btn">Send WhatsApp</button>
+      <button onclick="submitEmail()" class="summary-btn">Send Email</button>
+      <button onclick="closeSummary()" class="summary-btn">Close</button>
+    </div>
+  </div>
+</div>
+<!-- Resubmit chooser popup -->
+<div id="resubmitPopup" style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.22); justify-content: center; align-items: center; padding: 16px; z-index: 6000;">
+  <div class="summary-box" style="max-width:420px; background:#fff9e4;">
+    <div style="text-align:center; margin-bottom:12px;">
+      <strong>Resubmit Order</strong>
+    </div>
+    <p style="text-align:center;">Choose how you'd like to resubmit this order.</p>
+    <div style="display:flex; gap:12px; justify-content:center; margin-top:12px;">
+      <button id="resubmitWhatsAppBtn" class="summary-btn">WhatsApp</button>
+      <button id="resubmitEmailBtn" class="summary-btn">Email</button>
+      <button id="resubmitCancelBtn" class="summary-btn">Cancel</button>
+    </div>
   </div>
 </div>
 <script src="Product.js"></script>

@@ -47,10 +47,10 @@ function buildOrderPayload({
 }
 
 async function saveOrderPayload(orderPayload) {
-  return await postToGoogleApi({
-    action: "saveOrder",
-    order: orderPayload
-  });
+  const body = orderPayload && orderPayload.action === "saveOrder" && orderPayload.order
+    ? orderPayload.order
+    : orderPayload;
+  return await postToGoogleApi(body);
 }
 
 async function updateOrderPayload(orderRef, updates) {
@@ -62,21 +62,29 @@ async function updateOrderPayload(orderRef, updates) {
 }
 
 async function fetchOrder(orderRef) {
-  return await getFromGoogleApi({
-    action: "getOrder",
+  const result = await getFromGoogleApi({
+    action: "getorder",
     orderRef
   });
+  if (!result || result.success === false) return null;
+  if (!result.orderRef && !result.OrderRef) return null;
+  return result;
 }
 
 async function searchOrders(query) {
-  return await getFromGoogleApi({
-    action: "searchOrders",
+  const result = await getFromGoogleApi({
+    action: "searchorders",
     query: query || ""
   });
+  if (Array.isArray(result)) return result;
+  return {
+    error: result && result.message ? result.message : "Search failed",
+    payload: result
+  };
 }
 
 async function fetchDraftOrders() {
   return await getFromGoogleApi({
-    action: "getDraftOrders"
+    action: "getdraftorders"
   });
 }

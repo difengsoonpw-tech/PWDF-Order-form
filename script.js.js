@@ -506,8 +506,8 @@ if (submitOrderBtn) {
 
 function updateCounts() {
   const total = CART.reduce((s, i) => s + i.qty, 0);
-  cartCount.textContent = total;
-  cartCountBottom.textContent = total;
+  if (cartCount) cartCount.textContent = total;
+  if (cartCountBottom) cartCountBottom.textContent = total;
 }
 
 /* ADD TO CART + DECORATION */
@@ -837,28 +837,28 @@ async function saveOrderToGoogleSheet() {
   const orderRef = CURRENT_ORDER_REF || generateOrderRef();
   CURRENT_ORDER_REF = orderRef;
 
+  const items = CART.map(item => ({
+    code: item.item.split(" ")[0],
+    name: item.item,
+    qty: item.qty,
+    remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
+    choice: item.choice || "",
+    addon: item.addon || "",
+    category: item.category || ""
+  }));
+
   const payload = {
-    action: "saveOrder",
-    order: {
       orderRef,
       customer: customerName.value,
       company: brandName.value,
       contact: contactNumber.value,
       deliveryDate: "",
       status: "Draft",
-      orderJson: JSON.stringify(CART.map(item => ({
-        code: item.item.split(" ")[0],
-        name: item.item,
-        qty: item.qty,
-        remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
-        choice: item.choice || "",
-        addon: item.addon || "",
-        category: item.category || ""
-      }))),
+      orderJson: JSON.stringify(items),
+      items,
       createdDate: new Date().toISOString(),
       updatedDate: new Date().toISOString()
-    }
-  };
+    };
 
   await saveOrderPayload(payload);
 
