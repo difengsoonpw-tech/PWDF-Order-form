@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PWDF Edit Order</title>
+<style>
+body { margin:0; font-family: Arial, sans-serif; background: #fff8e6; color:#222222; min-height:100vh; }
+header { display:flex; align-items:center; justify-content:space-between; padding:16px; background:#ffffff; position:sticky; top:0; z-index:1000; border-bottom:1px solid rgba(212,169,44,0.25); }
+header a, header button { color:#222222; text-decoration:none; background:none; border:1px solid rgba(212,169,44,0.55); padding:8px 12px; border-radius:10px; cursor:pointer; }
+.container { max-width:1100px; margin:auto; padding:24px 16px 80px; }
+.order-header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:18px; }
+.order-header h2 { margin:0; }
+.order-panel { background:#fff9e4; border:1px solid rgba(212,169,44,0.22); border-radius:18px; padding:20px; margin-bottom:20px; }
+.input-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+input, textarea, select, button { width:100%; font-size:14px; margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(212,169,44,0.25); background:#ffffff; color:#222222; }
+textarea { min-height:120px; resize:vertical; }
+button.primary { background:rgba(212,169,44,0.95); color:#111; border:none; }
+button.secondary { background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
+.action-row { display:flex; flex-wrap:wrap; gap:12px; justify-content:flex-start; margin-top:16px; }
+#summaryPopup { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.22); justify-content: center; align-items: center; padding: 16px; z-index: 5000; }
+.summary-box { background: #d4a92c; width: 100%; max-width: 640px; padding: 18px; border-radius: 14px; border: 1px solid rgba(0,0,0,0.12); color: #111; }
+.summary-box h3, .summary-box p, .summary-box strong, .summary-box button, .summary-box .policy-box { color: #111; }
+.summary-box button { width: auto; }
+.policy-box { background: #fff3c2; border: 1px solid #e0c56a; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+@media(max-width:720px) {
+  .input-grid { grid-template-columns:1fr; }
+  header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .container { padding: 16px 12px 60px; }
+  .order-panel { padding: 16px; }
+  .action-row { flex-direction: column; }
+  #summaryPopup { padding: 12px; }
+  .summary-box { width: calc(100% - 20px); }
+}
+</style>
+</head>
+<body>
+<header>
+  <a href="staff.html">Sales Dashboard</a>
+  <span>Edit Order</span>
+  <button onclick="logoutStaff()" class="secondary">Logout</button>
+</header>
+<div class="container">
+  <div class="order-header">
+    <h2>Sales Order Editor</h2>
+    <div id="orderRefLabel">Order Ref: -</div>
+    <div id="orderStatusLabel">Status: -</div>
+  </div>
+  <div class="order-panel">
+    <h3>Customer Details</h3>
+    <div class="input-grid">
+      <input id="customerName" placeholder="Customer Name">
+      <input id="brandName" placeholder="Brand Name">
+      <input id="contactNumber" placeholder="Contact Number">
+      <input id="deliveryDate" type="date" placeholder="Delivery Date">
+    </div>
+    <textarea id="customerRemarks" placeholder="Customer remarks / notes"></textarea>
+    <div class="action-row">
+      <button id="saveDraftBtn" class="primary">Save Draft</button>
+      <button id="confirmOrderBtn" class="primary">Confirm Order</button>
+      <button onclick="location.href='staff.html'" class="secondary">Back to Dashboard</button>
+    </div>
+  </div>
+  <div class="order-panel">
+    <h3>Add Products</h3>
+    <div id="searchBar">
+      <div class="search-controls">
+        <input id="smartSearchInput" placeholder="Search name / code / flavour…">
+        <select id="priceMapCategoryFilter" class="category-filter"></select>
+      </div>
+    </div>
+    <div id="menuContainer" class="container"></div>
+  </div>
+  <div class="order-panel">
+    <h3>Cart</h3>
+    <div id="summaryPanel">
+      <div class="summary-info">
+        <div class="summary-left">
+          <div class="summary-count">Items: <span id="cartCountBottom">0</span></div>
+          <button id="submitOrderBtn" class="summary-btn">Review Order</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="summaryPopup">
+  <div class="summary-box">
+    <div style="text-align:center; margin-bottom:16px;">
+      <strong>Sales Order Review</strong>
+    </div>
+    <div class="policy-box">
+      <strong>⚠ IMPORTANT:</strong>
+      <p>This order can still be changed before confirmation.</p>
+    </div>
+    <h3>Cart</h3>
+    <div id="popupSummary"></div>
+    <br>
+    <button onclick="closeSummary()" class="summary-btn">Close</button>
+  </div>
+</div>
+<script src="Product.js"></script>
+<script src="imageMap.js"></script>
+<script src="google.js"></script>
+<script src="order.js"></script>
+<script src="script.js.js"></script>
+<script src="edit.js"></script>
+</body>
+</html>

@@ -13,14 +13,14 @@ html, body {
 body {
   margin: 0;
   font-family: Arial, sans-serif;
-  background-image: linear-gradient(rgba(16,15,12,0.55), rgba(16,15,12,0.55)), url("./image.png");
+  background-image: linear-gradient(rgba(255,250,244,0.95), rgba(255,250,244,0.95)), url("./image.png");
   background-size: 100% auto;
   background-position: center top;
   background-repeat: no-repeat;
-  background-color: #100f0c;
-  color: #f4e5b8;
+  background-color: #fff8e6;
+  color: #222222;
   font-size: 13px;
-  padding-top: 118px;
+  padding-top: 132px;
 }
 @media (max-width: 900px) {
   body {
@@ -37,22 +37,34 @@ header {
   top: 0;
   left: 0;
   right: 0;
-  background: #111;
-  color: #f4e5b8;
-  padding: 8px 12px;
+  background: #ffffff;
+  color: #222222;
+  padding: 14px 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   font-size: 18px;
   font-weight: bold;
-  border-bottom: 1px solid rgba(255,215,0,0.18);
+  border-bottom: 1px solid rgba(212,169,44,0.25);
   z-index: 1200;
 }
-header a {
+header a,
+header button {
   display: flex;
   align-items: center;
   text-decoration: none;
+  background: rgba(212,169,44,0.95);
+  color: #111;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  font-size: 14px;
+}
+header button {
+  min-width: 110px;
 }
 header .brand-logo {
   height: 28px;
@@ -68,64 +80,70 @@ header .brand-logo {
 
 /* ===== SEARCH BAR ===== */
 #searchBar {
-  position: fixed;
-  top: 44px;
-  left: 0;
-  right: 0;
-  z-index: 1150;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(14px);
-  border-bottom: none;
-  padding: 10px 0;
+  position: static;
+  width: 100%;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  flex: 1 1 540px;
+  min-width: 320px;
 }
 #searchBar .container {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
+  align-items: center;
+  margin: 0;
+  padding: 0;
 }
 .search-controls {
   width: 100%;
-  max-width: 900px;
+  max-width: 720px;
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
-@media (max-width: 600px) {
-  #searchBar {
-    position: fixed;
-    top: 44px;
-  }
-}
-
 #smartSearchInput {
-  flex: 1 1 260px;
-  width: 100%;
-  max-width: none;
+  flex: 1 1 auto;
+  min-width: 220px;
+  height: 40px;
   padding: 10px 14px;
   font-size: 13px;
   border: 1px solid rgba(212,169,44,0.35);
-  border-radius: 18px;
-  background: rgba(0, 0, 0, 0.64);
-  color: #f4e5b8;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+  border-radius: 22px;
+  background: #ffffff;
+  color: #222222;
+  box-shadow: 0 0 0 1px rgba(212,169,44,0.1) inset;
 }
 .category-filter {
-  flex: 0 0 180px;
-  padding: 10px 14px;
+  flex: 0 0 170px;
+  height: 40px;
+  padding: 0 14px;
   font-size: 13px;
   border: 1px solid rgba(212,169,44,0.35);
-  border-radius: 18px;
-  background: rgba(0, 0, 0, 0.64);
-  color: #f4e5b8;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
+  border-radius: 22px;
+  background: #ffffff;
+  color: #222222;
+  box-shadow: 0 0 0 1px rgba(212,169,44,0.1) inset;
 }
 #smartSearchInput::placeholder {
   color: #d0bb88;
 }
+@media (max-width: 760px) {
+  .search-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  #smartSearchInput,
+  .category-filter {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
 
 #menuContainer {
   display: none;
-  padding: 24px 0;
+  padding: 100px 0 0;
 }
 body.search-active #menuContainer {
   display: grid;
@@ -133,7 +151,7 @@ body.search-active #menuContainer {
   justify-content: center;
   justify-items: center;
   gap: 10px;
-  padding-top: 82px;
+  padding-top: 100px;
   padding-bottom: 100px;
 }
 #orderGuide {
@@ -147,10 +165,10 @@ body.search-active #menuContainer {
   left: 0;
   right: 0;
   z-index: 1090;
-  background: rgba(16,15,12,0.55);
-  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.95);
+  border-top: 1px solid rgba(212,169,44,0.15);
   padding: 10px 12px;
-  box-shadow: 0 -4px 18px rgba(0,0,0,0.22);
+  box-shadow: 0 -4px 18px rgba(0,0,0,0.08);
 }
 
 #summaryPanel .summary-info {
@@ -172,11 +190,11 @@ body.search-active #menuContainer {
 #summaryPanel .summary-count,
 #summaryPanel .summary-hint {
   font-size: 12px;
-  color: #f4e5b8;
+  color: #d5a646;
 }
 
 #summaryPanel .summary-hint {
-  color: #d0bb88;
+  color: #a67b32;
 }
 
 #summaryPanel .summary-btn {
@@ -188,25 +206,25 @@ body.search-active #menuContainer {
 
 #menuContainer {
   display: none;
-  padding: 24px 0 0;
+  padding: 110px 0 0;
 }
 
 body.search-active #menuContainer {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 150px));
   gap: 10px;
-  padding-top: 82px;
+  padding-top: 110px;
   padding-bottom: 100px;
 }
 
 /* ===== ITEM CARD ===== */
 .item-card {
   background: #d4a92c;
-  padding: 10px;
+  padding: 8px;
   border-radius: 12px;
   width: 100%;
-  max-width: 180px;
-  min-height: 170px;
+  max-width: 150px;
+  min-height: 150px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -217,7 +235,7 @@ body.search-active #menuContainer {
 .item-card .product-layout-photo {
   width: 100%;
   aspect-ratio: 1;
-  min-height: 140px;
+  min-height: 115px;
   background: #ffffff;
   border: 1px solid #000000;
   border-radius: 12px;
@@ -246,10 +264,10 @@ body.search-active #menuContainer {
   grid-column: 1 / -1;
   padding: 20px;
   border-radius: 16px;
-  background: #1f1a14;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.24);
+  background: #fff3d9;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.08);
   text-align: center;
-  color: #f4e5b8;
+  color: #222222;
   font-weight: 600;
 }
 .controls {
@@ -268,8 +286,8 @@ body.search-active #menuContainer {
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid rgba(212,169,44,0.22);
-  background: #1d1914;
-  color: #f4e5b8;
+  background: #ffffff;
+  color: #222222;
   font-size: 12px;
 }
 .controls select.qty-box {
@@ -288,13 +306,13 @@ body.search-active #menuContainer {
   background: transparent;
   color: #111;
   font-weight: 700;
-  border: 1px solid #000;
+  border: 1px solid rgba(212,169,44,0.75);
   cursor: pointer;
   box-shadow: none;
   font-size: 12px;
 }
 .controls button.add-btn:hover {
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.06);
 }
 .summary-btn {
   background: transparent;
@@ -311,7 +329,7 @@ body.search-active #menuContainer {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.5);
+  background: rgba(0,0,0,0.22);
   justify-content: center;
   align-items: center;
   padding: 16px;
@@ -395,6 +413,59 @@ body.search-active #menuContainer {
   header { font-size: 13px; padding: 5px 8px; }
   .brand-logo { height: 20px; }
 }
+
+/* Additional mobile-friendly layout adjustments */
+* {
+  box-sizing: border-box;
+}
+header {
+  flex-wrap: wrap;
+}
+.item-card {
+  max-width: 100%;
+}
+@media (max-width: 760px) {
+  #searchBar .container {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #smartSearchInput,
+  .category-filter,
+  .controls input.qty-box,
+  .controls select.qty-box,
+  .controls button.add-btn,
+  .summary-box input,
+  .summary-box button {
+    width: 100%;
+  }
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #menuContainer {
+    grid-template-columns: repeat(1, 1fr);
+  }
+  #summaryPanel .summary-info {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #summaryPanel .summary-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+  #summaryPanel .summary-btn {
+    width: 100%;
+    max-width: none;
+  }
+  .summary-box {
+    width: calc(100% - 24px);
+    max-width: 100%;
+  }
+}
 </style>
 </head>
 
@@ -404,21 +475,23 @@ body.search-active #menuContainer {
   <a href="index.html" onclick="goHome(); return false;" aria-label="Go to home page">
     <img src="logo.png" alt="Pastry World" class="brand-logo">
   </a>
-  <span style="margin-left:auto;">
-    Items: <span id="cartCount">0</span>
-  </span>
-</header>
-
-<div id="searchBar">
-  <div class="container">
-    <div class="search-controls">
-      <input id="smartSearchInput" placeholder="Search name / code / flavour…">
-      <select id="priceMapCategoryFilter" class="category-filter">
-        <option value="all">All Categories</option>
-      </select>
+  <div id="searchBar">
+    <div class="container">
+      <div class="search-controls">
+        <input id="smartSearchInput" placeholder="Search name / code / flavour…">
+        <select id="priceMapCategoryFilter" class="category-filter">
+          <option value="all">All Categories</option>
+        </select>
+      </div>
     </div>
   </div>
-</div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button type="button" onclick="window.location.href='staff.html'">Staff Mode</button>
+    <span>
+      Items: <span id="cartCount">0</span>
+    </span>
+  </div>
+</header>
 
 <div id="menuContainer" class="container">
   <div id="orderGuide" class="order-guide">
@@ -482,6 +555,8 @@ body.search-active #menuContainer {
 
 <script src="Product.js"></script>
 <script src="imageMap.js"></script>
+<script src="google.js"></script>
+<script src="order.js"></script>
 <script src="script.js.js"></script>
 
 </body>

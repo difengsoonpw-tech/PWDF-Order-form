@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PWDF Sales Dashboard</title>
+<style>
+body { margin:0; font-family: Arial, sans-serif; background:#fff8e6; color:#222222; min-height:100vh; }
+header { display:flex; align-items:center; justify-content:space-between; padding:16px; background:#ffffff; position:sticky; top:0; z-index:1000; border-bottom:1px solid rgba(212,169,44,0.25); }
+header a, header button { color:#222222; text-decoration:none; background:none; border:1px solid rgba(212,169,44,0.55); padding:8px 12px; border-radius:10px; cursor:pointer; }
+.container { max-width:1100px; margin:auto; padding:24px 16px 80px; }
+.staff-panel, .dashboard-panel { background:#fff9e4; border:1px solid rgba(212,169,44,0.22); border-radius:18px; padding:20px; margin-bottom:20px; }
+input, button, select, textarea { width:100%; font-size:14px; margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(212,169,44,0.25); background:#ffffff; color:#222222; }
+button { background:rgba(212,169,44,0.95); color:#111; border:none; max-width:220px; }
+button.secondary { width:auto; background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
+.order-table { width:100%; border-collapse:collapse; margin-top:16px; }
+@media (max-width: 760px) {
+  header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .container { padding: 16px 12px 60px; }
+  .staff-panel, .dashboard-panel { padding: 16px; }
+  .order-table { display: block; overflow-x: auto; }
+  .order-table th, .order-table td { white-space: nowrap; }
+  button { width: 100%; max-width: none; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+}
+button.secondary { background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
+.order-table { width:100%; border-collapse:collapse; margin-top:16px; }
+.order-table th, .order-table td { padding:12px 10px; border:1px solid rgba(212,169,44,0.18); text-align:left; font-size:13px; }
+.order-table th { background:rgba(212,169,44,0.15); }
+.actions button { margin-right:8px; margin-bottom:6px; }
+.status-pill { padding:6px 10px; border-radius:999px; font-size:12px; display:inline-block; }
+.status-draft { background:rgba(212,169,44,0.12); color:#222222; }
+.status-confirmed { background:rgba(34,139,34,0.15); color:#205b16; }
+.status-cancelled { background:rgba(189,23,23,0.15); color:#7a0d0d; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html">Customer Order</a>
+  <span>Sales Dashboard</span>
+  <button id="logoutBtn" class="secondary hidden">Logout</button>
+</header>
+<div class="container">
+  <div id="loginPanel" class="staff-panel">
+    <h2>Sales Login</h2>
+    <p>Only staff may access order search, draft management and editing.</p>
+    <input id="staffPassword" type="password" placeholder="Enter staff password">
+    <button id="loginBtn">Login</button>
+  </div>
+  <div id="dashboardPanel" class="dashboard-panel hidden">
+    <h2>Sales Management</h2>
+    <div>
+      <input id="searchInput" placeholder="Search Order Ref / Customer / Company / Delivery Date">
+      <button id="searchBtn">Search Orders</button>
+    </div>
+    <div id="searchResults"></div>
+    <h3>Draft Orders</h3>
+    <div id="draftContainer"></div>
+  </div>
+</div>
+<script src="google.js"></script>
+<script src="order.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

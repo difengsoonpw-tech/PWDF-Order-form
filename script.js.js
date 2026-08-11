@@ -32,11 +32,7 @@ function goHome() {
    (Customer never sees prices)
    ========================================= */
 
- const API_URL =
-"https://script.google.com/macros/s/AKfycbytfrFpyZJXRWMFzExnwphN2Y4a-lj_2SjYltpsCGwDuKc0w_8yEI2wzwDX62wpo43h/exec";  
-
-
-function getCatalogCategoryOptions() {
+ function getCatalogCategoryOptions() {
   const options = [{ value: "all", label: "All Categories" }];
   const categories = Object.keys(PRODUCTS || {});
 
@@ -486,6 +482,7 @@ function getDecorationPrice(category, choice, addon, qty = 1) {
 }
 
 let CART = [];
+let CURRENT_ORDER_REF = null;
 
 const submitOrderBtn = document.getElementById("submitOrderBtn");
 const orderGuide = document.getElementById("orderGuide");
@@ -703,6 +700,7 @@ function openOrderReview() {
     alert("Cart empty");
     return;
   }
+  CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
   renderCart();
   // Show the modal popup with customer details
   summaryPopup.style.display = "flex";
@@ -792,11 +790,11 @@ function buildText() {
   }
 
   let total = 0;
-  const orderRef = generateOrderRef();
+  CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
 
   let text = `✅ ORDER CONFIRMATION
 
-Order Ref: ${orderRef}
+Order Ref: ${CURRENT_ORDER_REF}
 
 Customer: ${customerName.value}
 Brand: ${brandName.value}
@@ -836,25 +834,33 @@ function closeSummary() {
   document.body.style.overflow = "auto";
 }
 async function saveOrderToGoogleSheet() {
+  const orderRef = CURRENT_ORDER_REF || generateOrderRef();
+  CURRENT_ORDER_REF = orderRef;
 
   const payload = {
-    customer: customerName.value,
-    brandName: brandName.value,
-    contact: contactNumber.value,
-
-    items: CART.map(item => ({
-      code: item.item.split(" ")[0],
-      name: item.item,
-      remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
-      qty: item.qty
-    }))
+    action: "saveOrder",
+    order: {
+      orderRef,
+      customer: customerName.value,
+      company: brandName.value,
+      contact: contactNumber.value,
+      deliveryDate: "",
+      status: "Draft",
+      orderJson: JSON.stringify(CART.map(item => ({
+        code: item.item.split(" ")[0],
+        name: item.item,
+        qty: item.qty,
+        remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
+        choice: item.choice || "",
+        addon: item.addon || "",
+        category: item.category || ""
+      }))),
+      createdDate: new Date().toISOString(),
+      updatedDate: new Date().toISOString()
+    }
   };
 
-  await fetch(API_URL, {
-    method: "POST",
-    mode: "no-cors",
-    body: JSON.stringify(payload)
-  });
+  await saveOrderPayload(payload);
 
   return true;
 }
