@@ -20,6 +20,8 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
 .action-row { display:flex; flex-wrap:wrap; gap:12px; justify-content:flex-start; margin-top:16px; }
   #summaryPopup { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.22); justify-content: center; align-items: flex-start; padding: 24px; z-index: 5000; overflow: auto; }
   .summary-box { background: #d4a92c; width: 100%; max-width: 640px; padding: 18px; border-radius: 14px; border: 1px solid rgba(0,0,0,0.12); color: #111; max-height: calc(100vh - 80px); overflow: auto; }
+  #popupSummary { max-height: calc(100vh - 320px); overflow: auto; padding-right: 8px; }
+  .summary-box { box-sizing: border-box; }
 .summary-box h3, .summary-box p, .summary-box strong, .summary-box button, .summary-box .policy-box { color: #111; }
 .summary-box button { width: auto; }
 .policy-box { background: #fff3c2; border: 1px solid #e0c56a; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
