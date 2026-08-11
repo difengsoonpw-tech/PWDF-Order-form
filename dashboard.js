@@ -7,6 +7,8 @@ const logoutBtn = document.getElementById("logoutBtn");
 const loginBtn = document.getElementById("loginBtn");
 const searchBtn = document.getElementById("searchBtn");
 const searchInput = document.getElementById("searchInput");
+const dateFilterBtn = document.getElementById("dateFilterBtn");
+const dateInput = document.getElementById("dateInput");
 const searchResults = document.getElementById("searchResults");
 const draftContainer = document.getElementById("draftContainer");
 
@@ -92,6 +94,22 @@ async function handleSearch() {
   renderSearchResults(orders, apiError);
 }
 
+async function filterByDate(date) {
+  console.log("filterByDate called", date);
+  if (!date) {
+    console.log("No date selected");
+    searchResults.innerHTML = "<p>Please select a delivery or created date to filter orders.</p>";
+    return;
+  }
+  const orders = await getOrdersByDate(date);
+  console.log("Date filter orders", orders);
+  if (!orders || !orders.length) {
+    searchResults.innerHTML = `<p>No orders found for <strong>${date}</strong>.</p>`;
+    return;
+  }
+  renderSearchResults(orders);
+}
+
 function renderSearchResults(orders, apiError) {
   if ((!orders || !orders.length) && apiError) {
     searchResults.innerHTML = `<p>Error searching orders: ${apiError}</p>`;
@@ -113,6 +131,7 @@ function renderOrderTable(orders, container, isDraftList) {
         <th>Order Ref</th>
         <th>Customer</th>
         <th>Company</th>
+        <th>Order Date</th>
         <th>Delivery Date</th>
         <th>Status</th>
         <th>Actions</th>
@@ -127,6 +146,7 @@ function renderOrderTable(orders, container, isDraftList) {
       <td>${order.orderRef || order.OrderRef || "-"}</td>
       <td>${order.customer || order.Customer || "-"}</td>
       <td>${order.company || order.Company || "-"}</td>
+      <td>${order.orderDate || order.OrderDate || order.createdDate || order.CreatedDate || "-"}</td>
       <td>${order.deliveryDate || order.DeliveryDate || "-"}</td>
       <td><span class="status-pill ${getStatusClass(order.status || order.Status)}">${order.status || order.Status || "-"}</span></td>
       <td class="actions"></td>
@@ -192,8 +212,14 @@ async function cancelOrder(orderRef) {
   await loadDraftOrders();
 }
 
-loginBtn?.addEventListener("click", handleLogin);
-logoutBtn?.addEventListener("click", logoutStaff);
-searchBtn?.addEventListener("click", handleSearch);
-
-requireStaffLogin();
+window.addEventListener("DOMContentLoaded", () => {
+  loginBtn?.addEventListener("click", handleLogin);
+  logoutBtn?.addEventListener("click", logoutStaff);
+  searchBtn?.addEventListener("click", handleSearch);
+  dateFilterBtn?.addEventListener("click", () => {
+    const selectedDate = dateInput?.value || "";
+    console.log("Date filter clicked", selectedDate);
+    filterByDate(selectedDate);
+  });
+  requireStaffLogin();
+});

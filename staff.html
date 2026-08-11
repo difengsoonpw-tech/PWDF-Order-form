@@ -48,13 +48,17 @@ button.secondary { width:auto; background:transparent; color:#222222; border:1px
     <h2>Sales Login</h2>
     <p>Only staff may access order search, draft management and editing.</p>
     <input id="staffPassword" type="password" placeholder="Enter staff password">
-    <button id="loginBtn">Login</button>
+    <button id="loginBtn" type="button">Login</button>
   </div>
   <div id="dashboardPanel" class="dashboard-panel hidden">
     <h2>Sales Management</h2>
     <div>
-      <input id="searchInput" placeholder="Search Order Ref / Customer / Company / Delivery Date">
-      <button id="searchBtn">Search Orders</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="searchInput" placeholder="Search Order Ref / Customer / Company / Order Date" style="flex:1; min-width:160px;">
+        <input id="dateInput" type="date" style="min-width:160px;">
+        <button id="dateFilterBtn" type="button" style="cursor:pointer;">Filter by Order Date</button>
+        <button id="searchBtn">Search Orders</button>
+      </div>
     </div>
     <div id="searchResults"></div>
     <h3>Draft Orders</h3>

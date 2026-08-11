@@ -17,9 +17,21 @@ function getSheetOrCreate(name, headerRow) {
   return sheet;
 }
 
+function normalizeHeaderValue(value) {
+  return String(value || "").trim().toLowerCase().replace(/[_\s]+/g, "");
+}
+
 function isHeaderRow(row, headerRow) {
   if (!Array.isArray(row) || !Array.isArray(headerRow)) return false;
-  return headerRow.every((value, index) => String(row[index] || "").trim().toLowerCase() === String(value).trim().toLowerCase());
+  const rowValues = row.map(normalizeHeaderValue);
+  const expected = headerRow.map(normalizeHeaderValue);
+  let matchCount = 0;
+  expected.forEach(expectedValue => {
+    if (expectedValue && rowValues.includes(expectedValue)) {
+      matchCount++;
+    }
+  });
+  return matchCount >= Math.max(2, Math.floor(expected.length / 3));
 }
 
 function getDataRows(sheet, headerRow) {
@@ -55,6 +67,9 @@ function doGet(e) {
 
     case "searchorders":
       return jsonResponse(searchOrders(e.parameter.query || ""));
+
+    case "getordersbydate":
+      return jsonResponse(getOrdersByDate(e.parameter.date || ""));
 
     case "getorder":
       return jsonResponse(fetchOrder(e.parameter.orderRef || ""));
@@ -283,6 +298,94 @@ function searchOrders(query) {
       return order.rowValues.some(value => value.includes(lowerQuery));
     })
     .map(({ rowValues, ...order }) => order);
+}
+
+function normalizeDateString(d) {
+  if (!d) return "";
+  const value = String(d || "").trim();
+  const datePart = value.split(" ")[0];
+  if (datePart.indexOf("/") >= 0) {
+    const parts = datePart.split("/");
+    if (parts.length === 3) {
+      let part1 = parts[0].trim();
+      let part2 = parts[1].trim();
+      let part3 = parts[2].trim();
+      const year = part3.length === 4 ? part3 : `20${part3}`;
+      // If first part is month > 12, swap to support dd/mm/yyyy too
+      let month = part1.padStart(2, "0");
+      let day = part2.padStart(2, "0");
+      if (Number(month) > 12 && Number(day) <= 12) {
+        month = part2.padStart(2, "0");
+        day = part1.padStart(2, "0");
+      }
+      return `${year}-${month}-${day}`;
+    }
+  }
+  if (datePart.indexOf("-") >= 0) {
+    const parts = datePart.split("-");
+    if (parts.length === 3) {
+      const [p1, p2, p3] = parts.map(part => part.trim());
+      if (p1.length === 4) {
+        return `${p1}-${p2.padStart(2, "0")}-${p3.padStart(2, "0")}`;
+      }
+      return `${p3}-${p2.padStart(2, "0")}-${p1.padStart(2, "0")}`;
+    }
+  }
+  return value;
+}
+
+function formatSheetDate(value) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  const stringValue = String(value || "").trim();
+  if (!stringValue) return "";
+  return normalizeDateString(stringValue) || stringValue;
+}
+
+function getOrdersByDate(dateStr) {
+  const dateNorm = normalizeDateString(String(dateStr || "").trim());
+  if (!dateNorm) return [];
+
+  const header = getSheetOrCreate(SHEET_HEADER, [
+    "OrderRef",
+    "Customer",
+    "Company",
+    "Contact",
+    "CreatedDate",
+    "DeliveryDate",
+    "Status",
+    "ItemCount"
+  ]);
+
+  const rows = getDataRows(header, [
+    "OrderRef",
+    "Customer",
+    "Company",
+    "Contact",
+    "CreatedDate",
+    "DeliveryDate",
+    "Status",
+    "ItemCount"
+  ]);
+
+  // match by order date only (string match on yyyy-MM-dd)
+  return rows
+    .map(row => ({
+      orderRef: row[0],
+      customer: row[1],
+      company: row[2],
+      contact: row[3],
+      orderDate: formatSheetDate(row[4]),
+      deliveryDate: formatSheetDate(row[5]),
+      status: row[6],
+      itemCount: row[7]
+    }))
+    .filter(o => {
+      const orderDate = o.orderDate || "";
+      return orderDate.indexOf(dateNorm) !== -1;
+    });
 }
 
 /*****************************************************

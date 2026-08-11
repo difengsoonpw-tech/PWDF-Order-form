@@ -83,6 +83,16 @@ async function searchOrders(query) {
   };
 }
 
+async function getOrdersByDate(date) {
+  if (!date) return [];
+  // date expected in yyyy-MM-dd (input[type=date] gives yyyy-MM-dd)
+  const result = await getFromGoogleApi({
+    action: "getordersbydate",
+    date: date
+  });
+  return Array.isArray(result) ? result : [];
+}
+
 async function fetchDraftOrders() {
   return await getFromGoogleApi({
     action: "getdraftorders"
