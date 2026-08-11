@@ -10,22 +10,24 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 header a, header button { color:#222222; text-decoration:none; background:none; border:1px solid rgba(212,169,44,0.55); padding:8px 12px; border-radius:10px; cursor:pointer; }
 .container { max-width:1100px; margin:auto; padding:24px 16px 80px; }
 .staff-panel, .dashboard-panel { background:#fff9e4; border:1px solid rgba(212,169,44,0.22); border-radius:18px; padding:20px; margin-bottom:20px; }
-input, button, select, textarea { width:100%; font-size:14px; margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(212,169,44,0.25); background:#ffffff; color:#222222; }
+input, button, select, textarea { width:100%; font-size:14px; margin-top:10px; padding:10px 12px; border-radius:12px; border:1px solid rgba(212,169,44,0.25); background:#ffffff; color:#222222; box-sizing:border-box; }
 button { background:rgba(212,169,44,0.95); color:#111; border:none; max-width:220px; }
 button.secondary { width:auto; background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
 .order-table { width:100%; border-collapse:collapse; margin-top:16px; }
-@media (max-width: 760px) {
+
+/* Mobile improvements */
+@media (max-width: 880px) {
   header { flex-direction: column; align-items: stretch; gap: 10px; }
-  .container { padding: 16px 12px 60px; }
-  .staff-panel, .dashboard-panel { padding: 16px; }
-  .order-table { display: block; overflow-x: auto; }
-  .order-table th, .order-table td { white-space: nowrap; }
-  button { width: 100%; max-width: none; }
-  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .container { padding: 12px 12px 60px; }
+  .staff-panel, .dashboard-panel { padding: 14px; }
+  input, button, select, textarea { font-size:16px; padding:12px 14px; }
+  .order-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .order-table th, .order-table td { white-space: nowrap; min-width:120px; }
+  button { width: 100%; max-width: none; padding:12px; }
+  .actions { display: flex; flex-direction:column; gap:8px; }
+  .order-table th, .order-table td { padding:12px 10px; border:1px solid rgba(212,169,44,0.18); text-align:left; font-size:14px; }
 }
-button.secondary { background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
-.order-table { width:100%; border-collapse:collapse; margin-top:16px; }
-.order-table th, .order-table td { padding:12px 10px; border:1px solid rgba(212,169,44,0.18); text-align:left; font-size:13px; }
+
 .order-table th { background:rgba(212,169,44,0.15); }
 .actions button { margin-right:8px; margin-bottom:6px; }
 .status-pill { padding:6px 10px; border-radius:999px; font-size:12px; display:inline-block; }
