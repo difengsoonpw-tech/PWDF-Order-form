@@ -5,7 +5,7 @@ const SHEET_HEADER = "ORDER_HEADER";
 const SHEET_DETAIL = "ORDER_DETAIL";
 const SHEET_SETTING = "SETTINGS";
 // Set this to your target spreadsheet ID (the long id in the sheet URL)
-const SPREADSHEET_ID = "PASTE_YOUR_SPREADSHEET_ID_HERE";
+const SPREADSHEET_ID = "1WYnM_rFCWDqGtPbHPcW8aYRb19I1ZfgyPO9E6o860rE";
 
 function getSpreadsheet() {
   try {
