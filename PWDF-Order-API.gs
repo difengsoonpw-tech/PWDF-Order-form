@@ -113,6 +113,7 @@ function doPost(e) {
  * SAVE ORDER
  *****************************************************/
 function saveOrder(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const header = getSheetOrCreate(SHEET_HEADER, [
     "OrderRef",
     "Customer",
@@ -154,6 +155,7 @@ function saveOrder(data) {
     header.getRange(foundRow, 8).setValue(items.length);
 
     clearOrderDetailRows(detail, orderRef);
+    Logger.log("Updated order %s at row %s in sheet %s of %s", orderRef, foundRow, header.getName(), ss.getUrl());
   } else {
     header.appendRow([
       orderRef,
@@ -165,6 +167,7 @@ function saveOrder(data) {
       status,
       items.length
     ]);
+    Logger.log("Appended order %s to sheet %s of %s", orderRef, header.getName(), ss.getUrl());
   }
 
   items.forEach(item => {
@@ -177,10 +180,24 @@ function saveOrder(data) {
     ]);
   });
 
+  const savedRow = (() => {
+    try {
+      const lastRow = header.getLastRow();
+      return lastRow;
+    } catch (e) {
+      return null;
+    }
+  })();
+
   return jsonResponse({
     success: true,
     orderRef: orderRef,
-    status: status
+    status: status,
+    debug: {
+      spreadsheetUrl: ss ? ss.getUrl() : null,
+      sheetName: header.getName(),
+      savedRow: savedRow
+    }
   });
 }
 

@@ -1,4 +1,4 @@
-const API_URL = "https://script.google.com/macros/s/AKfycbygBqCv8N6eYcGiB0nEQkhNyIh2RkHHjM4NkzIpjqlMyMDQ4ieMCEjRTWl_arVhEZ-d/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzuu8WNB2D3exvKTkhOYCPSGPJ8p4bxLmP_ozmVP1mIHHsku4auoOjLmqXwbj5_5I1k/exec";
 const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/your-webhook-url"; // Replace with actual Make.com webhook when ready
 
 async function postToGoogleApi(body) {
