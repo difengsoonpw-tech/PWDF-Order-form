@@ -4,9 +4,22 @@
 const SHEET_HEADER = "ORDER_HEADER";
 const SHEET_DETAIL = "ORDER_DETAIL";
 const SHEET_SETTING = "SETTINGS";
+// Set this to your target spreadsheet ID (the long id in the sheet URL)
+const SPREADSHEET_ID = "PASTE_YOUR_SPREADSHEET_ID_HERE";
+
+function getSpreadsheet() {
+  try {
+    if (SPREADSHEET_ID && SPREADSHEET_ID.indexOf("PASTE_") === -1) {
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    }
+  } catch (e) {
+    Logger.log("openById failed, falling back to getActiveSpreadsheet: %s", e);
+  }
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
 
 function getSheetOrCreate(name, headerRow) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
     sheet = ss.insertSheet(name);
