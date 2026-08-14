@@ -12,17 +12,31 @@ async function postToGoogleApi(body) {
     });
 
     if (!response.ok) {
-      throw new Error("HTTP " + response.status);
+      const text = await response.text().catch(() => "");
+      console.error("Google API POST failed", response.status, text);
+      alert("Google API POST failed: HTTP " + response.status + " - " + (text || response.statusText));
+      return { success: false, error: "HTTP " + response.status, details: text };
     }
 
-    const result = await response.json();
-    console.log("Google API:", result);
+    const result = await response.json().catch(err => {
+      console.error("Failed to parse JSON response from Google API", err);
+      alert("Google API returned invalid JSON: " + (err.message || err));
+      return { success: false, error: "invalid_json" };
+    });
+
+    console.log("Google API POST result:", result, "body:", body);
+    if (result && result.success === false) {
+      console.warn("Google API reported error", result);
+      alert("Google API error: " + (result.error || result.message || JSON.stringify(result)));
+    }
+
     return result;
   } catch (err) {
     console.error("Google API POST failed", err);
+    alert("Google API POST failed: " + (err.message || err));
     return {
       success: false,
-      error: err.message
+      error: err.message || String(err)
     };
   }
 }
