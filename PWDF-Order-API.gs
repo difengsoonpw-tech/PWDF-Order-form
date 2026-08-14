@@ -126,7 +126,7 @@ function doPost(e) {
  * SAVE ORDER
  *****************************************************/
 function saveOrder(data) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   const header = getSheetOrCreate(SHEET_HEADER, [
     "OrderRef",
     "Customer",
