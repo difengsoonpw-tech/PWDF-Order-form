@@ -106,7 +106,15 @@ function doGet(e) {
  *****************************************************/
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
+    var data;
+    if (e.parameter && e.parameter.payload) {
+      data = JSON.parse(e.parameter.payload);
+    } else if (e.postData && e.postData.contents) {
+      data = JSON.parse(e.postData.contents);
+    } else {
+      throw new Error('No POST data received');
+    }
+
     const action = (data.action || "").toLowerCase();
 
     if (action === "updateorder") {
