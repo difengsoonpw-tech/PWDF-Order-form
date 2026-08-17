@@ -860,7 +860,12 @@ async function saveOrderToGoogleSheet() {
       updatedDate: new Date().toISOString()
     };
 
-  await saveOrderPayload(payload);
+  const result = await saveOrderPayload(payload);
+
+  if (!result || result.success === false) {
+    const errMsg = (result && (result.error || result.message)) || 'Unknown error saving order';
+    throw new Error('Save failed: ' + errMsg);
+  }
 
   return true;
 }
