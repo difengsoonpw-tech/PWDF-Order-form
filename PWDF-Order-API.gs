@@ -110,7 +110,21 @@ function doPost(e) {
     if (e.parameter && e.parameter.payload) {
       data = JSON.parse(e.parameter.payload);
     } else if (e.postData && e.postData.contents) {
-      data = JSON.parse(e.postData.contents);
+      // Some clients (or Apps Script contexts) deliver form-encoded bodies
+      // in e.postData.contents as a URL-encoded string like "payload=%7B...%7D".
+      // Try to handle that robustly by extracting and decoding the payload value.
+      var contents = e.postData.contents;
+      if (typeof contents === 'string' && contents.indexOf('payload=') === 0) {
+        var raw = contents.substring('payload='.length);
+        try {
+          data = JSON.parse(decodeURIComponent(raw));
+        } catch (innerErr) {
+          // Fall back to attempting to parse the raw contents directly
+          data = JSON.parse(contents);
+        }
+      } else {
+        data = JSON.parse(contents);
+      }
     } else {
       throw new Error('No POST data received');
     }
