@@ -1383,6 +1383,22 @@ PRODUCTS = {
       "choice": "",
       "addon": ""
     }
+    ,
+    {
+      "name": "MFF-M0063 110GM MUFFIN NASI LEMAK -30pcs/Slab",
+      "choice": "",
+      "addon": ""
+    },
+    {
+      "name": "MFF-M0062 110GM MUFFIN CHICKEN FLOSS -30pcs/Slab",
+      "choice": "",
+      "addon": ""
+    },
+    {
+      "name": "MFF-M0064 110GM MUFFIN PANDAN KAYA CHEESE -30pcs/Slab",
+      "choice": "",
+      "addon": ""
+    }
   ],
   "PASTRY": [
 
