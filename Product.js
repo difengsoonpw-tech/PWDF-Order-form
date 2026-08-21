@@ -86,7 +86,7 @@ PRODUCTS = {
       "addon": ""
     },
     {
-      "name": "BREAD-FL-V0007 7\" VIETNAM BREAD BAGUETTE 100GM+/- x 54PCS",
+      "name": "BREAD-FL-V0010 7\" VIETNAM BREAD BAGUETTE 100GM+/- x 54PCS",
       "choice": "",
       "addon": ""
     },
