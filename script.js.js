@@ -827,9 +827,19 @@ ${ORDER_POLICY_TEXT}`;
 
 
 
-function submitEmail() {
+async function submitEmail() {
   const t = buildText();
-  if (t) location.href = `mailto:?subject=New Order&body=${encodeURIComponent(t)}`;
+  if (!t) return;
+
+  try {
+    await saveOrderToGoogleSheet();
+    alert("Order saved successfully.");
+  } catch (err) {
+    console.error(err);
+    alert("Failed to save order: " + (err.message || err));
+  }
+
+  location.href = `mailto:?subject=New Order&body=${encodeURIComponent(t)}`;
 }
 
 function closeSummary() {
