@@ -3,12 +3,12 @@ const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/your-webhook-url"; // Replac
 
 async function postToGoogleApi(body) {
   try {
-    const formData = new URLSearchParams();
-    formData.append("payload", JSON.stringify(body));
-
     const response = await fetch(API_URL, {
       method: "POST",
-      body: formData
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
     });
 
     const text = await response.text();
