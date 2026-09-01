@@ -69,6 +69,20 @@ function ensureSettingsSheet(settingSheet) {
  * GET REQUEST
  *****************************************************/
 function doGet(e) {
+  // Support JSONP save via callback + payload (avoids CORS preflight)
+  if (e.parameter && e.parameter.callback && e.parameter.payload) {
+    try {
+      const cb = String(e.parameter.callback || "").replace(/[^\w\_\$]/g, "");
+      const payload = JSON.parse(String(e.parameter.payload || "{}"));
+      const result = saveOrderObject(payload);
+      const js = `${cb}(${JSON.stringify(result)});`;
+      return ContentService.createTextOutput(js).setMimeType(ContentService.MimeType.JAVASCRIPT);
+    } catch (err) {
+      const errJs = `console && console.error(${JSON.stringify(String(err))});`;
+      return ContentService.createTextOutput(errJs).setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+  }
+
   const action = (e.parameter.action || "ping").toLowerCase();
 
   switch (action) {
@@ -148,6 +162,12 @@ function doPost(e) {
  * SAVE ORDER
  *****************************************************/
 function saveOrder(data) {
+  // Delegate to saveOrderObject and wrap response in JSON output
+  const result = saveOrderObject(data);
+  return jsonResponse(result);
+}
+
+function saveOrderObject(data) {
   const ss = getSpreadsheet();
   const header = getSheetOrCreate(SHEET_HEADER, [
     "OrderRef",
@@ -224,7 +244,7 @@ function saveOrder(data) {
     }
   })();
 
-  return jsonResponse({
+  return {
     success: true,
     orderRef: orderRef,
     status: status,
@@ -233,7 +253,7 @@ function saveOrder(data) {
       sheetName: header.getName(),
       savedRow: savedRow
     }
-  });
+  };
 }
 
 function clearOrderDetailRows(detailSheet, orderRef) {

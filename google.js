@@ -35,12 +35,31 @@ async function postToGoogleApi(body) {
 
     return result;
   } catch (err) {
-    console.error("Google API POST failed:", err);
-    alert("Google API POST failed: " + (err.message || err));
-    return {
-      success: false,
-      error: err.message || String(err)
-    };
+    console.warn("Google API POST failed, attempting JSONP fallback:", err);
+
+    // JSONP fallback: create a script tag with callback and payload
+    return await new Promise((resolve) => {
+      const cbName = '__pwdf_cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+      window[cbName] = function(res) {
+        try { resolve(res); } finally { try { delete window[cbName]; } catch(e){} }
+      };
+
+      const payloadParam = encodeURIComponent(JSON.stringify(body));
+      const script = document.createElement('script');
+      script.src = `${API_URL}?callback=${cbName}&payload=${payloadParam}`;
+      script.onerror = function(e) {
+        try { delete window[cbName]; } catch(e){}
+        resolve({ success: false, error: 'jsonp_error' });
+      };
+      document.head.appendChild(script);
+      // cleanup after a timeout in case callback never fires
+      setTimeout(() => {
+        if (window[cbName]) {
+          try { delete window[cbName]; } catch(e){}
+          resolve({ success: false, error: 'jsonp_timeout' });
+        }
+      }, 10000);
+    });
   }
 }
 
