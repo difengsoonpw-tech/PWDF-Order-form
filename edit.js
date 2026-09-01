@@ -152,11 +152,14 @@ async function resubmitOrder() {
 
   const onCancel = () => cleanup();
 
-  const onWa = async () => {
+    const onWa = async () => {
     try {
       await saveOrderToGoogleSheet();
       const t = buildText();
-      if (t) window.open(`https://wa.me/?text=${encodeURIComponent(t)}`, "_blank");
+      if (t) {
+        const waNumber = '60143755008';
+        window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(t)}`, "_blank");
+      }
       alert("Order saved and opened in WhatsApp.");
     } catch (err) {
       console.error(err);

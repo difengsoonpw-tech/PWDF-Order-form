@@ -99,7 +99,13 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     <div id="popupSummary"></div>
     <br>
     <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:12px;">
-      <button onclick="submitWhatsApp()" class="summary-btn">Send WhatsApp</button>
+      <button onclick="submitWhatsApp()" class="summary-btn" aria-label="Send WhatsApp">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:8px;">
+          <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .04 5.33.04 11.96c0 2.11.55 4.18 1.6 6.02L0 24l6.29-1.63A11.9 11.9 0 0012 23.92c6.63 0 11.96-5.33 11.96-11.96 0-3.2-1.24-6.2-3.44-8.48z" fill="#25D366"/>
+          <path d="M17.3 14.1c-.3-.15-1.78-.88-2.06-.98-.28-.1-.48-.15-.68.15-.17.28-.66.98-.81 1.18-.15.2-.3.22-.57.07-.3-.15-1.27-.47-2.42-1.48-.9-.8-1.5-1.8-1.68-2.09-.18-.28-.02-.43.13-.57.13-.12.3-.3.45-.45.15-.15.2-.25.3-.42.1-.17.05-.33-.02-.48-.07-.15-.68-1.64-.93-2.24-.24-.58-.49-.5-.68-.51l-.58-.01c-.2 0-.52.07-.8.33-.28.26-1.06 1.04-1.06 2.53 0 1.5 1.09 2.95 1.24 3.15.15.2 2.14 3.45 5.2 4.83 3.06 1.38 3.06.92 3.62.86.56-.07 1.79-.73 2.04-1.44.25-.71.25-1.32.18-1.44-.08-.12-.28-.17-.58-.32z" fill="#fff"/>
+        </svg>
+        Send WhatsApp
+      </button>
       <button onclick="submitEmail()" class="summary-btn">Send Email</button>
       <button onclick="closeSummary()" class="summary-btn">Close</button>
     </div>
@@ -113,7 +119,13 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     </div>
     <p style="text-align:center;">Choose how you'd like to resubmit this order.</p>
     <div style="display:flex; gap:12px; justify-content:center; margin-top:12px;">
-      <button id="resubmitWhatsAppBtn" class="summary-btn">WhatsApp</button>
+      <button id="resubmitWhatsAppBtn" class="summary-btn" aria-label="Resubmit via WhatsApp">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;">
+          <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .04 5.33.04 11.96c0 2.11.55 4.18 1.6 6.02L0 24l6.29-1.63A11.9 11.9 0 0012 23.92c6.63 0 11.96-5.33 11.96-11.96 0-3.2-1.24-6.2-3.44-8.48z" fill="#25D366"/>
+          <path d="M17.3 14.1c-.3-.15-1.78-.88-2.06-.98-.28-.1-.48-.15-.68.15-.17.28-.66.98-.81 1.18-.15.2-.3.22-.57.07-.3-.15-1.27-.47-2.42-1.48-.9-.8-1.5-1.8-1.68-2.09-.18-.28-.02-.43.13-.57.13-.12.3-.3.45-.45.15-.15.2-.25.3-.42.1-.17.05-.33-.02-.48-.07-.15-.68-1.64-.93-2.24-.24-.58-.49-.5-.68-.51l-.58-.01c-.2 0-.52.07-.8.33-.28.26-1.06 1.04-1.06 2.53 0 1.5 1.09 2.95 1.24 3.15.15.2 2.14 3.45 5.2 4.83 3.06 1.38 3.06.92 3.62.86.56-.07 1.79-.73 2.04-1.44.25-.71.25-1.32.18-1.44-.08-.12-.28-.17-.58-.32z" fill="#fff"/>
+        </svg>
+        WhatsApp
+      </button>
       <button id="resubmitEmailBtn" class="summary-btn">Email</button>
       <button id="resubmitCancelBtn" class="summary-btn">Cancel</button>
     </div>
@@ -127,3 +139,17 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
 <script src="edit.js"></script>
 </body>
 </html>
+
+<!-- Floating WhatsApp button -->
+<a href="https://wa.me/60143755008" target="_blank" rel="noopener" class="floating-wa" aria-label="Chat on WhatsApp">
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .04 5.33.04 11.96c0 2.11.55 4.18 1.6 6.02L0 24l6.29-1.63A11.9 11.9 0 0012 23.92c6.63 0 11.96-5.33 11.96-11.96 0-3.2-1.24-6.2-3.44-8.48z" fill="#25D366"/>
+    <path d="M17.3 14.1c-.3-.15-1.78-.88-2.06-.98-.28-.1-.48-.15-.68.15-.17.28-.66.98-.81 1.18-.15.2-.3.22-.57.07-.3-.15-1.27-.47-2.42-1.48-.9-.8-1.5-1.8-1.68-2.09-.18-.28-.02-.43.13-.57.13-.12.3-.3.45-.45.15-.15.2-.25.3-.42.1-.17.05-.33-.02-.48-.07-.15-.68-1.64-.93-2.24-.24-.58-.49-.5-.68-.51l-.58-.01c-.2 0-.52.07-.8.33-.28.26-1.06 1.04-1.06 2.53 0 1.5 1.09 2.95 1.24 3.15.15.2 2.14 3.45 5.2 4.83 3.06 1.38 3.06.92 3.62.86.56-.07 1.79-.73 2.04-1.44.25-.71.25-1.32.18-1.44-.08-.12-.28-.17-.58-.32z" fill="#fff"/>
+  </svg>
+</a>
+
+<style>
+  .floating-wa { position: fixed; bottom: 18px; right: 18px; width: 56px; height: 56px; border-radius: 50%; background: #25D366; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(0,0,0,0.18); z-index: 1400; text-decoration: none; }
+  .floating-wa svg { display:block; }
+  @media (max-width:420px) { .floating-wa { bottom: 12px; right: 12px; width: 48px; height:48px; } }
+</style>

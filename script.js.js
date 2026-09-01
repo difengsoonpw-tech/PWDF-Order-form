@@ -887,9 +887,10 @@ async function submitWhatsApp() {
   const t = buildText();
   if (!t) return;
 
-  // Open WhatsApp FIRST
+  // Open WhatsApp to specific number FIRST (Malaysia: 0143755008 -> 60143755008)
+  const waNumber = '60143755008';
   const waWindow = window.open(
-    `https://wa.me/?text=${encodeURIComponent(t)}`,
+    `https://wa.me/${waNumber}?text=${encodeURIComponent(t)}`,
     "_blank"
   );
 
