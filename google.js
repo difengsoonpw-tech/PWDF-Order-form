@@ -1,5 +1,11 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbyzjefQAgtsElv6ks29yZLt5Mb0oFpHR83r2y4UwoQ7UdWPdrCv2rnLwvvkhuV-UX_4/exec";
+// Set your Make webhook URL here when available (e.g. https://hook.us1.make.com/xxxxx)
 const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/your-webhook-url"; // Replace with actual Make.com webhook when ready
+
+function isMobile() {
+  if (typeof navigator === 'undefined' || !navigator.userAgent) return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
 
 async function postToGoogleApi(body) {
   try {
@@ -35,7 +41,27 @@ async function postToGoogleApi(body) {
 
     return result;
   } catch (err) {
-    console.warn("Google API POST failed, attempting JSONP fallback:", err);
+    console.warn("Google API POST failed:", err);
+
+    // Try form-encoded POST (avoids CORS preflight) as a fallback before JSONP
+    try {
+      const respForm = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'payload=' + encodeURIComponent(JSON.stringify(body))
+      });
+      const textForm = await respForm.text();
+      try {
+        const resultForm = JSON.parse(textForm);
+        if (respForm.ok) return resultForm;
+      } catch (e) {
+        console.warn('Form POST returned non-JSON or parse failed', e, textForm);
+      }
+    } catch (e) {
+      console.warn('Form POST attempt failed', e);
+    }
+
+    console.warn("Attempting JSONP fallback after fetch failure:", err);
 
     // JSONP fallback: create a script tag with callback and payload
     return await new Promise((resolve) => {
@@ -88,18 +114,35 @@ async function getFromGoogleApi(params = {}) {
   }
 }
 
-async function triggerMakeWebhook(payload) {
+async function triggerMakeWebhook(payload, options = { mode: 'cors', expectJson: true }) {
+  const mode = (options && options.mode) || 'cors';
+  const expectJson = typeof (options && options.expectJson) === 'boolean' ? options.expectJson : true;
   try {
-    return await fetch(MAKE_WEBHOOK_URL, {
-      method: "POST",
+    const resp = await fetch(MAKE_WEBHOOK_URL, {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload),
-      mode: "no-cors"
+      mode: mode
     });
+
+    // If caller doesn't expect JSON (no-cors), return a best-effort success
+    if (!expectJson) return { success: true, forwarded: true, mode };
+
+    // If response is opaque (no-cors), return best-effort success
+    if (!resp || resp.type === 'opaque') return { success: true, forwarded: 'opaque', mode };
+
+    if (!resp.ok) return { success: false, status: resp.status };
+
+    try {
+      const json = await resp.json();
+      return json;
+    } catch (e) {
+      return { success: true, forwarded: true, mode };
+    }
   } catch (err) {
-    console.warn("Make webhook failed", err);
+    console.warn('Make webhook failed', err);
     return null;
   }
 }
