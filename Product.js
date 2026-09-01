@@ -849,12 +849,12 @@ PRODUCTS = {
       "addon": ""
     },
     {
-      "name": "CAKE-CUP-M0009 SLAB-48",
+      "name": "CAKE-CUP-M0009 MIXED FLAVOR COMBO 1 SLAB-48",
       "choice": "",
       "addon": ""
     },
     {
-      "name": "CAKE-CUP-M0010 SLAB-48",
+      "name": "CAKE-CUP-M0010 MIXED FLAVOR COMBO 2 SLAB-48",
       "choice": "",
       "addon": ""
     }
