@@ -567,9 +567,33 @@ function generateOrderRef(settingSheet) {
  * JSON RESPONSE
  *****************************************************/
 function jsonResponse(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+  const output = ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  try {
+    // Prefer setting CORS headers when available
+    if (typeof output.setHeader === 'function') {
+      output.setHeader('Access-Control-Allow-Origin', '*');
+      output.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+  } catch (e) {
+    // ignore if setHeader not supported in this runtime
+  }
+  return output;
+}
+
+// Handle preflight OPTIONS requests for CORS
+function doOptions(e) {
+  const output = ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
+  try {
+    if (typeof output.setHeader === 'function') {
+      output.setHeader('Access-Control-Allow-Origin', '*');
+      output.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+  } catch (err) {
+    // ignore
+  }
+  return output;
 }
 
 /*****************************************************
