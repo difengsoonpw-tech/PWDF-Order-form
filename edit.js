@@ -188,10 +188,20 @@ async function resubmitOrder() {
 
 function logoutStaff() {
   sessionStorage.removeItem("pwdfStaffAuth");
+  setStaffToken("");
   window.location.href = "staff.html";
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  // This page edits existing orders, so it is staff-only. The server also
+  // enforces this, but redirecting here gives a clearer experience than
+  // showing an empty page.
+  if (!getStaffToken()) {
+    alert("Please log in as staff first.");
+    window.location.href = "staff.html";
+    return;
+  }
+
   populateCategoryFilter();
   if (orderRef) loadOrderForEditing();
 });

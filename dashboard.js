@@ -1,4 +1,6 @@
-const STAFF_PASSWORD = "pwdfsales2026";
+/* The staff password is NOT stored here any more.
+   It lives in Script Properties inside the Google Apps Script project and is
+   checked by the server. See PWDF-Order-API.gs for setup instructions. */
 const LOGIN_STORAGE_KEY = "pwdfStaffAuth";
 
 const loginPanel = document.getElementById("loginPanel");
@@ -13,7 +15,8 @@ const searchResults = document.getElementById("searchResults");
 const draftContainer = document.getElementById("draftContainer");
 
 function isStaffLoggedIn() {
-  return sessionStorage.getItem(LOGIN_STORAGE_KEY) === "true";
+  // The token itself is the credential — if we hold one, we are logged in.
+  return !!getStaffToken();
 }
 
 function requireStaffLogin() {
@@ -37,16 +40,40 @@ function setStaffAuthenticated(value) {
 async function handleLogin() {
   const passwordInput = document.getElementById("staffPassword");
   if (!passwordInput) return;
-  if (passwordInput.value === STAFF_PASSWORD) {
+
+  const entered = passwordInput.value.trim();
+  if (!entered) {
+    alert("Please enter the staff password.");
+    return;
+  }
+
+  const originalLabel = loginBtn ? loginBtn.textContent : "Login";
+  if (loginBtn) {
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Checking…";
+  }
+
+  // The password is checked by the server, never in the browser.
+  const accepted = await verifyStaffToken(entered);
+
+  if (loginBtn) {
+    loginBtn.disabled = false;
+    loginBtn.textContent = originalLabel;
+  }
+
+  if (accepted) {
+    setStaffToken(entered);
     setStaffAuthenticated(true);
     passwordInput.value = "";
     requireStaffLogin();
   } else {
+    passwordInput.value = "";
     alert("Invalid staff password.");
   }
 }
 
 function logoutStaff() {
+  setStaffToken("");
   setStaffAuthenticated(false);
   requireStaffLogin();
 }

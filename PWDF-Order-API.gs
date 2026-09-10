@@ -1,23 +1,176 @@
 /*****************************************************
- * PWDF ORDER API V2
+ * PWDF ORDER API V3 — with access control
+ *
+ * SETUP REQUIRED (one time, in the Apps Script editor):
+ *   1. Click the gear icon (Project Settings) on the left.
+ *   2. Scroll to "Script Properties" and click "Add script property".
+ *   3. Add these two properties:
+ *
+ *        Property          Value
+ *        ---------------   ---------------------------------------
+ *        SPREADSHEET_ID    the long id from your Google Sheet URL
+ *        STAFF_TOKEN       a long random password of your choosing
+ *
+ *   4. Click "Save script properties".
+ *   5. Run the checkSetup() function once to confirm both are set.
+ *
+ * Script Properties are stored inside your Google account. They are NOT
+ * part of this file, so they never appear in GitHub or in any browser.
+ *
+ * WHO CAN DO WHAT
+ *   Public (no token)  : create a NEW draft order. Nothing else.
+ *   Staff (with token) : search, read, list drafts, update, edit orders.
  *****************************************************/
+
 const SHEET_HEADER = "ORDER_HEADER";
 const SHEET_DETAIL = "ORDER_DETAIL";
 const SHEET_SETTING = "SETTINGS";
-// Set this to your target spreadsheet ID (the long id in the sheet URL)
-const SPREADSHEET_ID = "1WYnM_rFCWDqGtPbHPcW8aYRb19I1ZfgyPO9E6o860rE";
 
-function getSpreadsheet() {
-  try {
-    if (SPREADSHEET_ID && SPREADSHEET_ID.indexOf("PASTE_") === -1) {
-      return SpreadsheetApp.openById(SPREADSHEET_ID);
-    }
-  } catch (e) {
-    Logger.log("openById failed, falling back to getActiveSpreadsheet: %s", e);
-  }
-  return SpreadsheetApp.getActiveSpreadsheet();
+const HEADER_COLUMNS = [
+  "OrderRef",
+  "Customer",
+  "Company",
+  "Contact",
+  "CreatedDate",
+  "DeliveryDate",
+  "Status",
+  "ItemCount"
+];
+
+const DETAIL_COLUMNS = ["OrderRef", "Code", "Name", "Remark", "Qty"];
+
+/* Limits applied to orders submitted by the public, to prevent spam */
+const PUBLIC_MAX_ITEMS = 150;
+const PUBLIC_MAX_TEXT_LENGTH = 200;
+
+/*****************************************************
+ * CONFIGURATION (read from Script Properties)
+ *****************************************************/
+function scriptProps() {
+  return PropertiesService.getScriptProperties();
 }
 
+function getConfiguredSpreadsheetId() {
+  return String(scriptProps().getProperty("SPREADSHEET_ID") || "").trim();
+}
+
+function getConfiguredStaffToken() {
+  return String(scriptProps().getProperty("STAFF_TOKEN") || "").trim();
+}
+
+/**
+ * Run this once from the Apps Script editor to confirm setup is correct.
+ * It never prints the secret values themselves.
+ */
+function checkSetup() {
+  const id = getConfiguredSpreadsheetId();
+  const token = getConfiguredStaffToken();
+
+  Logger.log("SPREADSHEET_ID set : %s", id ? "YES" : "NO  <-- add this");
+  Logger.log("STAFF_TOKEN set    : %s", token ? "YES" : "NO  <-- add this");
+
+  if (token && token.length < 12) {
+    Logger.log("WARNING: STAFF_TOKEN is short. Use at least 12 characters.");
+  }
+
+  try {
+    const ss = getSpreadsheet();
+    Logger.log("Spreadsheet opened : YES (%s)", ss.getName());
+  } catch (err) {
+    Logger.log("Spreadsheet opened : NO — %s", err);
+  }
+}
+
+function getSpreadsheet() {
+  const id = getConfiguredSpreadsheetId();
+  if (id) {
+    return SpreadsheetApp.openById(id);
+  }
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) return active;
+  throw new Error("SPREADSHEET_ID script property is not set. Run checkSetup().");
+}
+
+/*****************************************************
+ * ACCESS CONTROL
+ *****************************************************/
+
+/**
+ * Compares two strings without leaking length/content through timing.
+ */
+function tokensMatch(supplied, expected) {
+  const a = String(supplied || "");
+  const b = String(expected || "");
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
+ * Returns true only when the caller supplied the correct staff token.
+ * If STAFF_TOKEN has not been configured, nobody counts as staff.
+ */
+function callerIsStaff(e, parsedBody) {
+  const expected = getConfiguredStaffToken();
+  if (!expected) return false;
+
+  let supplied = "";
+  if (e && e.parameter && e.parameter.token) {
+    supplied = e.parameter.token;
+  } else if (parsedBody && parsedBody.token) {
+    supplied = parsedBody.token;
+  }
+
+  return tokensMatch(supplied, expected);
+}
+
+function unauthorizedResponse() {
+  return jsonResponse({
+    success: false,
+    error: "unauthorized",
+    message: "Staff access required."
+  });
+}
+
+/*****************************************************
+ * VALIDATION FOR PUBLIC SUBMISSIONS
+ *****************************************************/
+function trimToLength(value, maxLength) {
+  return String(value == null ? "" : value).slice(0, maxLength);
+}
+
+function sanitizePublicOrder(data) {
+  const items = Array.isArray(data.items) ? data.items : [];
+
+  if (items.length > PUBLIC_MAX_ITEMS) {
+    throw new Error("Order has too many line items.");
+  }
+
+  return {
+    // orderRef deliberately omitted: the server always generates a new one,
+    // so a public caller can never overwrite an existing order.
+    customer: trimToLength(data.customer, PUBLIC_MAX_TEXT_LENGTH),
+    company: trimToLength(data.company || data.brandName, PUBLIC_MAX_TEXT_LENGTH),
+    contact: trimToLength(data.contact, PUBLIC_MAX_TEXT_LENGTH),
+    deliveryDate: trimToLength(data.deliveryDate, 40),
+    status: "Draft", // public submissions are always drafts
+    items: items.map(item => ({
+      code: trimToLength(item.code, 60),
+      name: trimToLength(item.name, PUBLIC_MAX_TEXT_LENGTH),
+      remark: trimToLength(item.remark, PUBLIC_MAX_TEXT_LENGTH),
+      qty: Math.max(0, Math.min(100000, Number(item.qty) || 0))
+    }))
+  };
+}
+
+/*****************************************************
+ * SHEET HELPERS
+ *****************************************************/
 function getSheetOrCreate(name, headerRow) {
   const ss = getSpreadsheet();
   let sheet = ss.getSheetByName(name);
@@ -65,136 +218,145 @@ function ensureSettingsSheet(settingSheet) {
   return settingSheet;
 }
 
+function getHeaderSheet() {
+  return getSheetOrCreate(SHEET_HEADER, HEADER_COLUMNS);
+}
+
+function getDetailSheet() {
+  return getSheetOrCreate(SHEET_DETAIL, DETAIL_COLUMNS);
+}
+
 /*****************************************************
  * GET REQUEST
  *****************************************************/
 function doGet(e) {
-  // Support JSONP save via callback + payload (avoids CORS preflight)
-  if (e.parameter && e.parameter.callback && e.parameter.payload) {
+  e = e || {};
+  const params = e.parameter || {};
+
+  // JSONP path — used by the customer site to submit an order.
+  // This is PUBLIC, so it may only ever create a brand new draft order.
+  if (params.callback && params.payload) {
+    const cb = String(params.callback || "").replace(/[^\w\_\$]/g, "");
     try {
-      const cb = String(e.parameter.callback || "").replace(/[^\w\_\$]/g, "");
-      const payload = JSON.parse(String(e.parameter.payload || "{}"));
-      const result = saveOrderObject(payload);
-      const js = `${cb}(${JSON.stringify(result)});`;
-      return ContentService.createTextOutput(js).setMimeType(ContentService.MimeType.JAVASCRIPT);
+      const payload = JSON.parse(String(params.payload || "{}"));
+      const staff = callerIsStaff(e, payload);
+      const result = saveOrderObject(payload, staff);
+      return ContentService
+        .createTextOutput(`${cb}(${JSON.stringify(result)});`)
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     } catch (err) {
-      const errJs = `console && console.error(${JSON.stringify(String(err))});`;
-      return ContentService.createTextOutput(errJs).setMimeType(ContentService.MimeType.JAVASCRIPT);
+      const safe = { success: false, error: "save_failed" };
+      return ContentService
+        .createTextOutput(`${cb}(${JSON.stringify(safe)});`)
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
     }
   }
 
-  const action = (e.parameter.action || "ping").toLowerCase();
+  const action = String(params.action || "ping").toLowerCase();
+
+  // ---- Public actions ----
+  if (action === "ping") {
+    return jsonResponse({ success: true, message: "PWDF API ONLINE" });
+  }
+
+  // Lets the staff login screen check a password without exposing anything.
+  if (action === "verifytoken") {
+    return jsonResponse({ success: callerIsStaff(e, null) });
+  }
+
+  // ---- Everything below requires the staff token ----
+  if (!callerIsStaff(e, null)) {
+    return unauthorizedResponse();
+  }
 
   switch (action) {
-    case "ping":
-      return jsonResponse({
-        success: true,
-        message: "PWDF API ONLINE"
-      });
-
     case "searchorders":
-      return jsonResponse(searchOrders(e.parameter.query || ""));
+      return jsonResponse(searchOrders(params.query || ""));
 
     case "getordersbydate":
-      return jsonResponse(getOrdersByDate(e.parameter.date || ""));
+      return jsonResponse(getOrdersByDate(params.date || ""));
 
     case "getorder":
-      return jsonResponse(fetchOrder(e.parameter.orderRef || ""));
+      return jsonResponse(fetchOrder(params.orderRef || ""));
 
     case "getdraftorders":
       return jsonResponse(fetchDraftOrders());
 
     default:
-      return jsonResponse({
-        success: false,
-        message: "Unknown Action",
-        receivedAction: e.parameter.action,
-        loweredAction: action,
-        params: e.parameter
-      });
+      return jsonResponse({ success: false, message: "Unknown Action" });
   }
 }
 
 /*****************************************************
  * POST REQUEST
  *****************************************************/
+function parsePostBody(e) {
+  if (e && e.parameter && e.parameter.payload) {
+    return JSON.parse(e.parameter.payload);
+  }
+
+  if (e && e.postData && e.postData.contents) {
+    const contents = e.postData.contents;
+    if (typeof contents === "string" && contents.indexOf("payload=") === 0) {
+      const raw = contents.substring("payload=".length);
+      try {
+        return JSON.parse(decodeURIComponent(raw));
+      } catch (innerErr) {
+        return JSON.parse(contents);
+      }
+    }
+    return JSON.parse(contents);
+  }
+
+  throw new Error("No POST data received");
+}
+
 function doPost(e) {
   try {
-    var data;
-    if (e.parameter && e.parameter.payload) {
-      data = JSON.parse(e.parameter.payload);
-    } else if (e.postData && e.postData.contents) {
-      // Some clients (or Apps Script contexts) deliver form-encoded bodies
-      // in e.postData.contents as a URL-encoded string like "payload=%7B...%7D".
-      // Try to handle that robustly by extracting and decoding the payload value.
-      var contents = e.postData.contents;
-      if (typeof contents === 'string' && contents.indexOf('payload=') === 0) {
-        var raw = contents.substring('payload='.length);
-        try {
-          data = JSON.parse(decodeURIComponent(raw));
-        } catch (innerErr) {
-          // Fall back to attempting to parse the raw contents directly
-          data = JSON.parse(contents);
-        }
-      } else {
-        data = JSON.parse(contents);
-      }
-    } else {
-      throw new Error('No POST data received');
-    }
-
-    const action = (data.action || "").toLowerCase();
+    const data = parsePostBody(e);
+    const staff = callerIsStaff(e, data);
+    const action = String(data.action || "").toLowerCase();
 
     if (action === "updateorder") {
+      if (!staff) return unauthorizedResponse();
       return updateOrder(data.orderRef || "", data.updates || {});
     }
 
-    return saveOrder(data.order || data);
+    const order = data.order || data;
+    return jsonResponse(saveOrderObject(order, staff));
   } catch (err) {
-    return jsonResponse({
-      success: false,
-      error: err.toString()
-    });
+    return jsonResponse({ success: false, error: "request_failed" });
   }
 }
 
 /*****************************************************
  * SAVE ORDER
+ *
+ * isStaffRequest === false  -> always creates a NEW draft order.
+ * isStaffRequest === true   -> may also update an existing order.
  *****************************************************/
-function saveOrder(data) {
-  // Delegate to saveOrderObject and wrap response in JSON output
-  const result = saveOrderObject(data);
-  return jsonResponse(result);
-}
+function saveOrderObject(rawData, isStaffRequest) {
+  const data = isStaffRequest ? (rawData || {}) : sanitizePublicOrder(rawData || {});
 
-function saveOrderObject(data) {
-  const ss = getSpreadsheet();
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-  const detail = getSheetOrCreate(SHEET_DETAIL, [
-    "OrderRef",
-    "Code",
-    "Name",
-    "Remark",
-    "Qty"
-  ]);
+  const header = getHeaderSheet();
+  const detail = getDetailSheet();
   const setting = ensureSettingsSheet(getSheetOrCreate(SHEET_SETTING, ["Key", "Value"]));
 
-  const orderRef = String(data.orderRef || generateOrderRef(setting)).trim();
   const items = Array.isArray(data.items) ? data.items : [];
   const companyName = data.company || data.brandName || "";
   const status = data.status || "Draft";
 
-  const headerValues = header.getDataRange().getValues();
-  const existingIndex = headerValues.slice(1).findIndex(row => String(row[0] || "").toLowerCase() === orderRef.toLowerCase());
+  // Only staff may target an existing order reference.
+  const requestedRef = isStaffRequest ? String(data.orderRef || "").trim() : "";
+  const orderRef = requestedRef || generateOrderRef(setting);
+
+  let existingIndex = -1;
+  if (isStaffRequest && requestedRef) {
+    const headerValues = header.getDataRange().getValues();
+    existingIndex = headerValues
+      .slice(1)
+      .findIndex(row => String(row[0] || "").toLowerCase() === orderRef.toLowerCase());
+  }
 
   if (existingIndex >= 0) {
     const foundRow = existingIndex + 2;
@@ -204,13 +366,11 @@ function saveOrderObject(data) {
       companyName,
       data.contact || ""
     ]]);
-
     header.getRange(foundRow, 6).setValue(data.deliveryDate || "");
     header.getRange(foundRow, 7).setValue(status);
     header.getRange(foundRow, 8).setValue(items.length);
 
     clearOrderDetailRows(detail, orderRef);
-    Logger.log("Updated order %s at row %s in sheet %s of %s", orderRef, foundRow, header.getName(), ss.getUrl());
   } else {
     header.appendRow([
       orderRef,
@@ -222,7 +382,6 @@ function saveOrderObject(data) {
       status,
       items.length
     ]);
-    Logger.log("Appended order %s to sheet %s of %s", orderRef, header.getName(), ss.getUrl());
   }
 
   items.forEach(item => {
@@ -235,24 +394,11 @@ function saveOrderObject(data) {
     ]);
   });
 
-  const savedRow = (() => {
-    try {
-      const lastRow = header.getLastRow();
-      return lastRow;
-    } catch (e) {
-      return null;
-    }
-  })();
-
+  // Note: no spreadsheet URL or internal details are returned to the caller.
   return {
     success: true,
     orderRef: orderRef,
-    status: status,
-    debug: {
-      spreadsheetUrl: ss ? ss.getUrl() : null,
-      sheetName: header.getName(),
-      savedRow: savedRow
-    }
+    status: status
   };
 }
 
@@ -266,19 +412,10 @@ function clearOrderDetailRows(detailSheet, orderRef) {
 }
 
 /*****************************************************
- * UPDATE ORDER
+ * UPDATE ORDER  (staff only — enforced in doPost)
  *****************************************************/
 function updateOrder(orderRef, updates) {
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
+  const header = getHeaderSheet();
   const rows = header.getDataRange().getValues();
   let foundRow = null;
 
@@ -290,10 +427,7 @@ function updateOrder(orderRef, updates) {
   }
 
   if (!foundRow) {
-    return jsonResponse({
-      success: false,
-      error: "Order not found"
-    });
+    return jsonResponse({ success: false, error: "Order not found" });
   }
 
   const updateMap = {
@@ -320,33 +454,15 @@ function updateOrder(orderRef, updates) {
 }
 
 /*****************************************************
- * SEARCH ORDERS
+ * SEARCH ORDERS  (staff only — enforced in doGet)
  *****************************************************/
 function searchOrders(query) {
   const trimmedQuery = String(query || "").trim();
   const lowerQuery = trimmedQuery.toLowerCase();
   if (!lowerQuery) return [];
 
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-  const rows = getDataRows(header, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
+  const header = getHeaderSheet();
+  const rows = getDataRows(header, HEADER_COLUMNS);
 
   const mapped = rows.map(row => ({
     orderRef: row[0],
@@ -360,15 +476,15 @@ function searchOrders(query) {
     rowValues: row.map(cell => String(cell || "").toLowerCase())
   }));
 
-  const exactMatches = mapped.filter(order => String(order.orderRef || "").trim().toLowerCase() === lowerQuery);
+  const exactMatches = mapped.filter(
+    order => String(order.orderRef || "").trim().toLowerCase() === lowerQuery
+  );
   if (exactMatches.length) {
     return exactMatches.map(({ rowValues, ...order }) => order);
   }
 
   return mapped
-    .filter(order => {
-      return order.rowValues.some(value => value.includes(lowerQuery));
-    })
+    .filter(order => order.rowValues.some(value => value.includes(lowerQuery)))
     .map(({ rowValues, ...order }) => order);
 }
 
@@ -383,7 +499,6 @@ function normalizeDateString(d) {
       let part2 = parts[1].trim();
       let part3 = parts[2].trim();
       const year = part3.length === 4 ? part3 : `20${part3}`;
-      // If first part is month > 12, swap to support dd/mm/yyyy too
       let month = part1.padStart(2, "0");
       let day = part2.padStart(2, "0");
       if (Number(month) > 12 && Number(day) <= 12) {
@@ -420,29 +535,9 @@ function getOrdersByDate(dateStr) {
   const dateNorm = normalizeDateString(String(dateStr || "").trim());
   if (!dateNorm) return [];
 
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
+  const header = getHeaderSheet();
+  const rows = getDataRows(header, HEADER_COLUMNS);
 
-  const rows = getDataRows(header, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-
-  // match by order date only (string match on yyyy-MM-dd)
   return rows
     .map(row => ({
       orderRef: row[0],
@@ -454,47 +549,22 @@ function getOrdersByDate(dateStr) {
       status: row[6],
       itemCount: row[7]
     }))
-    .filter(o => {
-      const orderDate = o.orderDate || "";
-      return orderDate.indexOf(dateNorm) !== -1;
-    });
+    .filter(o => (o.orderDate || "").indexOf(dateNorm) !== -1);
 }
 
 /*****************************************************
- * FETCH ORDER
+ * FETCH ORDER  (staff only — enforced in doGet)
  *****************************************************/
 function fetchOrder(orderRef) {
   if (!orderRef) return null;
 
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-  const detail = getSheetOrCreate(SHEET_DETAIL, [
-    "OrderRef",
-    "Code",
-    "Name",
-    "Remark",
-    "Qty"
-  ]);
+  const header = getHeaderSheet();
+  const detail = getDetailSheet();
 
-  const headerRows = getDataRows(header, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-  const orderRow = headerRows.find(row => String(row[0] || "").toLowerCase() === String(orderRef || "").toLowerCase());
+  const headerRows = getDataRows(header, HEADER_COLUMNS);
+  const orderRow = headerRows.find(
+    row => String(row[0] || "").toLowerCase() === String(orderRef || "").toLowerCase()
+  );
 
   if (!orderRow) return null;
 
@@ -524,30 +594,11 @@ function fetchOrder(orderRef) {
 }
 
 /*****************************************************
- * FETCH DRAFT ORDERS
+ * FETCH DRAFT ORDERS  (staff only — enforced in doGet)
  *****************************************************/
 function fetchDraftOrders() {
-  const header = getSheetOrCreate(SHEET_HEADER, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
-
-  const rows = getDataRows(header, [
-    "OrderRef",
-    "Customer",
-    "Company",
-    "Contact",
-    "CreatedDate",
-    "DeliveryDate",
-    "Status",
-    "ItemCount"
-  ]);
+  const header = getHeaderSheet();
+  const rows = getDataRows(header, HEADER_COLUMNS);
 
   return rows
     .map(row => ({
@@ -571,12 +622,7 @@ function generateOrderRef(settingSheet) {
   if (!nextNo) nextNo = 1;
 
   const today = new Date();
-  const dateString = Utilities.formatDate(
-    today,
-    Session.getScriptTimeZone(),
-    "yyyyMMdd"
-  );
-
+  const dateString = Utilities.formatDate(today, Session.getScriptTimeZone(), "yyyyMMdd");
   const orderRef = "PWDF-" + dateString + "-" + Utilities.formatString("%03d", nextNo);
 
   settingSheet.getRange("B2").setValue(nextNo + 1);
@@ -587,59 +633,31 @@ function generateOrderRef(settingSheet) {
  * JSON RESPONSE
  *****************************************************/
 function jsonResponse(obj) {
-  const output = ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  const output = ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
   try {
-    // Prefer setting CORS headers when available
-    if (typeof output.setHeader === 'function') {
-      output.setHeader('Access-Control-Allow-Origin', '*');
-      output.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (typeof output.setHeader === "function") {
+      output.setHeader("Access-Control-Allow-Origin", "*");
+      output.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      output.setHeader("Access-Control-Allow-Headers", "Content-Type");
     }
   } catch (e) {
-    // ignore if setHeader not supported in this runtime
+    // ignore if setHeader is not supported in this runtime
   }
   return output;
 }
 
-// Handle preflight OPTIONS requests for CORS
 function doOptions(e) {
-  const output = ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
+  const output = ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
   try {
-    if (typeof output.setHeader === 'function') {
-      output.setHeader('Access-Control-Allow-Origin', '*');
-      output.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      output.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (typeof output.setHeader === "function") {
+      output.setHeader("Access-Control-Allow-Origin", "*");
+      output.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      output.setHeader("Access-Control-Allow-Headers", "Content-Type");
     }
   } catch (err) {
     // ignore
   }
   return output;
-}
-
-/*****************************************************
- * TEST API
- *****************************************************/
-function testAPI() {
-  const payload = {
-    customer: "TEST CUSTOMER",
-    brandName: "TEST BRAND",
-    contact: "0123456789",
-    deliveryDate: "2026-08-20",
-    items: [
-      {
-        code: "TEST001",
-        name: "Chocolate Cake",
-        remark: "CUT",
-        qty: 2
-      }
-    ]
-  };
-
-  const fake = {
-    postData: {
-      contents: JSON.stringify(payload)
-    }
-  };
-
-  Logger.log(doPost(fake).getContent());
 }

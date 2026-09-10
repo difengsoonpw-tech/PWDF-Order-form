@@ -2,12 +2,74 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyzjefQAgtsElv6ks29yZLt
 // Set your Make webhook URL here when available (e.g. https://hook.us1.make.com/xxxxx)
 const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/your-webhook-url"; // Replace with actual Make.com webhook when ready
 
+/*****************************************************
+ * STAFF ACCESS TOKEN
+ *
+ * The staff password is NEVER stored in this file. Staff type it on the
+ * login screen, it is checked by the server, and it is then kept only in
+ * this browser tab (sessionStorage) until the tab is closed.
+ *
+ * Customers never have a token, so their requests are treated as public
+ * and may only create a new draft order.
+ *****************************************************/
+const STAFF_TOKEN_KEY = "pwdfStaffToken";
+
+function getStaffToken() {
+  try {
+    return sessionStorage.getItem(STAFF_TOKEN_KEY) || "";
+  } catch (err) {
+    return "";
+  }
+}
+
+function setStaffToken(token) {
+  try {
+    if (token) {
+      sessionStorage.setItem(STAFF_TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(STAFF_TOKEN_KEY);
+    }
+  } catch (err) {
+    /* storage unavailable — staff will simply be asked to log in again */
+  }
+}
+
+function withStaffToken(body) {
+  const token = getStaffToken();
+  if (!token) return body;
+  return Object.assign({}, body, { token: token });
+}
+
+/**
+ * Asks the server whether this password is correct.
+ * The password is never compared in the browser.
+ */
+async function verifyStaffToken(token) {
+  if (!token) return false;
+  try {
+    const url = new URL(API_URL);
+    url.searchParams.set("action", "verifytoken");
+    url.searchParams.set("token", token);
+    const response = await fetch(url.toString(), { method: "GET", cache: "no-cache" });
+    if (!response.ok) return false;
+    const result = await response.json();
+    return !!(result && result.success);
+  } catch (err) {
+    console.warn("Staff token check failed", err);
+    return false;
+  }
+}
+
 function isMobile() {
   if (typeof navigator === 'undefined' || !navigator.userAgent) return false;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
-async function postToGoogleApi(body) {
+async function postToGoogleApi(rawBody) {
+  // Attaches the staff token when one is present. Customer submissions
+  // carry no token and are handled by the server as public draft creation.
+  const body = withStaffToken(rawBody);
+
   try {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -93,6 +155,10 @@ async function getFromGoogleApi(params = {}) {
   try {
     const url = new URL(API_URL);
     Object.keys(params).forEach(key => url.searchParams.set(key, params[key]));
+
+    const token = getStaffToken();
+    if (token) url.searchParams.set("token", token);
+
     const response = await fetch(url.toString(), {
       method: "GET",
       mode: "cors",
