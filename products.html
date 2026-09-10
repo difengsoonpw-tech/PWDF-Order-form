@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PWDF Product Portal</title>
+<style>
+body { margin:0; font-family: Arial, sans-serif; background:#fff8e6; color:#222222; min-height:100vh; }
+header { display:flex; align-items:center; justify-content:space-between; padding:16px; background:#ffffff; position:sticky; top:0; z-index:1000; border-bottom:1px solid rgba(212,169,44,0.25); gap:10px; flex-wrap:wrap; }
+header a, header button { color:#222222; text-decoration:none; background:none; border:1px solid rgba(212,169,44,0.55); padding:8px 12px; border-radius:10px; cursor:pointer; font-size:14px; }
+.navlinks { display:flex; gap:8px; flex-wrap:wrap; }
+.navlinks a.current { background:rgba(212,169,44,0.95); border-color:transparent; }
+.container { max-width:1200px; margin:auto; padding:24px 16px 80px; }
+.staff-panel, .portal-panel { background:#fff9e4; border:1px solid rgba(212,169,44,0.22); border-radius:18px; padding:20px; margin-bottom:20px; }
+input, button, select, textarea { font-size:14px; padding:10px 12px; border-radius:12px; border:1px solid rgba(212,169,44,0.25); background:#ffffff; color:#222222; box-sizing:border-box; }
+input, select, textarea { width:100%; margin-top:6px; }
+button { background:rgba(212,169,44,0.95); color:#111; border:none; cursor:pointer; }
+button.secondary { background:transparent; color:#222222; border:1px solid rgba(212,169,44,0.55); }
+button.icon-btn { width:36px; height:36px; padding:0; display:flex; align-items:center; justify-content:center; background:#ffffff; border:1px solid rgba(212,169,44,0.4); border-radius:8px; font-size:16px; }
+.hidden { display:none !important; }
+
+.toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.toolbar .filters { display:flex; gap:10px; flex-wrap:wrap; flex:1; min-width:220px; }
+.toolbar input, .toolbar select { margin-top:0; width:auto; min-width:180px; }
+.summary { font-size:13px; color:#6a5a2c; margin-bottom:14px; }
+
+.product-table-wrap { background:#ffffff; border:1px solid rgba(212,169,44,0.22); border-radius:14px; overflow:hidden; }
+table.product-table { width:100%; border-collapse:collapse; }
+.product-table th { background:rgba(212,169,44,0.15); text-align:left; padding:10px 12px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#6a5a2c; }
+.product-table td { padding:10px 12px; border-top:1px solid rgba(212,169,44,0.15); font-size:13.5px; vertical-align:middle; }
+.product-thumb { width:44px; height:44px; border-radius:8px; object-fit:cover; background:#f1e6c2; display:block; }
+.product-thumb.placeholder { display:flex; align-items:center; justify-content:center; font-size:10px; color:#a3924f; }
+.product-name { font-weight:700; }
+.product-code { font-family: 'Courier New', monospace; font-size:11.5px; color:#8a7638; margin-top:2px; }
+.pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:11.5px; font-weight:700; }
+.pill-visible { background:#e9f3e7; color:#2f6b29; }
+.pill-hidden { background:#f0eee0; color:#7a6d3d; }
+.pill-dot { width:6px; height:6px; border-radius:50%; display:inline-block; }
+.row-actions { display:flex; gap:6px; justify-content:flex-end; white-space:nowrap; }
+
+/* Edit drawer */
+.overlay { position:fixed; inset:0; background:rgba(28,20,5,0.35); z-index:1900; }
+.drawer { position:fixed; top:0; right:0; bottom:0; width:min(440px, 100vw); background:#ffffff; border-left:1px solid rgba(212,169,44,0.3); z-index:2000; display:flex; flex-direction:column; box-shadow:-8px 0 24px rgba(0,0,0,0.12); }
+.drawer-header { display:flex; align-items:flex-start; justify-content:space-between; padding:18px 20px; border-bottom:1px solid rgba(212,169,44,0.2); }
+.drawer-header h2 { margin:0 0 4px; font-size:17px; }
+.drawer-header .code-tag { font-family:'Courier New', monospace; font-size:11.5px; color:#8a7638; }
+.drawer-body { padding:18px 20px; overflow-y:auto; flex-grow:1; display:flex; flex-direction:column; gap:16px; }
+.field-label { font-size:12px; font-weight:700; color:#6a5a2c; margin-bottom:4px; display:block; }
+.field-hint { font-size:11px; color:#9a8a55; margin-top:4px; }
+.field-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.photo-row { display:flex; gap:14px; align-items:center; }
+.photo-preview { width:88px; height:88px; border-radius:10px; object-fit:cover; background:#f1e6c2; flex-shrink:0; }
+.photo-placeholder-box { flex-grow:1; border:1.5px dashed #d9c37f; border-radius:10px; background:#fffaf0; padding:14px; text-align:center; color:#9a8a55; font-size:12px; }
+.visible-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff9e4; border:1px solid rgba(212,169,44,0.25); border-radius:10px; padding:12px 14px; }
+.switch { position:relative; width:42px; height:24px; border-radius:999px; background:#c9c2a8; flex-shrink:0; cursor:pointer; border:none; padding:0; }
+.switch.on { background:#4c9142; }
+.switch .knob { position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#ffffff; transition:left 0.15s; }
+.switch.on .knob { left:21px; }
+.drawer-footer { display:flex; gap:10px; padding:16px 20px; border-top:1px solid rgba(212,169,44,0.2); }
+.drawer-footer button { flex-grow:1; padding:12px; font-weight:700; }
+.drawer-footer button.secondary { flex-grow:0; padding:12px 20px; }
+.price-input-wrap { display:flex; align-items:center; border:1px solid rgba(212,169,44,0.25); border-radius:12px; overflow:hidden; background:#ffffff; margin-top:6px; }
+.price-input-wrap span { padding:10px 10px; background:rgba(212,169,44,0.12); font-weight:700; font-size:13px; color:#6a5a2c; }
+.price-input-wrap input { border:none; margin-top:0; border-radius:0; }
+
+@media (max-width: 880px) {
+  header { flex-direction: column; align-items: stretch; }
+  .container { padding: 12px 12px 60px; }
+  .product-table-wrap { overflow-x:auto; }
+  table.product-table { min-width:640px; }
+  .field-row2 { grid-template-columns: 1fr; }
+  .drawer { width:100vw; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="navlinks">
+    <a href="index.html">Customer Order</a>
+    <a href="staff.html">Sales Dashboard</a>
+    <a href="products.html" class="current">Products</a>
+  </div>
+  <button id="logoutBtn" class="secondary hidden">Logout</button>
+</header>
+<div class="container">
+
+  <div id="loginPanel" class="staff-panel">
+    <h2>Staff Login</h2>
+    <p>Only staff may add, edit, price or hide products.</p>
+    <input id="staffPassword" type="password" placeholder="Enter staff password">
+    <button id="loginBtn" type="button" style="margin-top:10px;">Login</button>
+  </div>
+
+  <div id="portalPanel" class="portal-panel hidden">
+    <div class="toolbar">
+      <div>
+        <h2 style="margin:0 0 4px;">Products</h2>
+        <div id="summaryLine" class="summary">Loading…</div>
+      </div>
+      <div class="filters">
+        <input id="searchInput" placeholder="Search name or code" style="max-width:220px;">
+        <select id="categoryFilter" style="max-width:180px;"><option value="">All categories</option></select>
+        <select id="visibilityFilter" style="max-width:160px;">
+          <option value="">All products</option>
+          <option value="visible">Visible only</option>
+          <option value="hidden">Hidden only</option>
+        </select>
+      </div>
+      <button id="addProductBtn" type="button">+ Add product</button>
+    </div>
+
+    <div class="product-table-wrap">
+      <table class="product-table">
+        <thead>
+          <tr>
+            <th style="width:60px;">Photo</th>
+            <th>Product</th>
+            <th>Category</th>
+            <th style="text-align:right;">Wholesale</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="productTableBody">
+          <tr><td colspan="6" style="padding:20px; text-align:center; color:#9a8a55;">Loading products…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Edit / Add drawer (hidden until opened) -->
+<div id="drawerOverlay" class="overlay hidden"></div>
+<div id="drawer" class="drawer hidden">
+  <div class="drawer-header">
+    <div>
+      <h2 id="drawerTitle">Add product</h2>
+      <span id="drawerCodeTag" class="code-tag"></span>
+    </div>
+    <button id="drawerCloseBtn" class="icon-btn" type="button" title="Close">✕</button>
+  </div>
+  <div class="drawer-body">
+
+    <div class="photo-row">
+      <img id="photoPreview" class="photo-preview hidden" alt="">
+      <div id="photoPlaceholder" class="photo-preview" style="display:flex; align-items:center; justify-content:center; color:#b7a768; font-size:11px;">No photo</div>
+      <div class="photo-placeholder-box">
+        Photo upload is coming in the next update.<br>For now, paste a file name into "Photo file" below if you already uploaded one to the MASTER_LIST_PHOTO folder.
+      </div>
+    </div>
+
+    <div>
+      <label class="field-label" for="fieldName">Product name *</label>
+      <input id="fieldName" placeholder="e.g. Brioche Burger Bun 60g">
+    </div>
+
+    <div class="field-row2">
+      <div>
+        <label class="field-label" for="fieldCode">Product code</label>
+        <input id="fieldCode" placeholder="Auto-generated for new products" disabled>
+        <div class="field-hint" id="codeHint">Left blank — a code is created automatically when you save.</div>
+      </div>
+      <div>
+        <label class="field-label" for="fieldCategory">Category</label>
+        <input id="fieldCategory" placeholder="e.g. Bread, Cake, Macaron" list="categoryList">
+        <datalist id="categoryList"></datalist>
+      </div>
+    </div>
+
+    <div class="field-row2">
+      <div>
+        <label class="field-label" for="fieldOptions">Options</label>
+        <input id="fieldOptions" placeholder="e.g. Uncut / 45 Cut">
+        <div class="field-hint">Separate choices with /</div>
+      </div>
+      <div>
+        <label class="field-label" for="fieldAddon">Add-on</label>
+        <input id="fieldAddon" placeholder="Optional">
+      </div>
+    </div>
+
+    <div>
+      <label class="field-label" for="fieldPrice">Wholesale price</label>
+      <div class="price-input-wrap">
+        <span>RM</span>
+        <input id="fieldPrice" type="number" step="0.01" min="0" placeholder="0.00">
+      </div>
+      <div class="field-hint">Staff only — customers never see this figure.</div>
+    </div>
+
+    <div>
+      <label class="field-label" for="fieldPhoto">Photo file</label>
+      <input id="fieldPhoto" placeholder="e.g. MASTER_LIST_PHOTO/BREAD-BG-B0004.JPG">
+    </div>
+
+    <div class="visible-toggle-row">
+      <div>
+        <div style="font-weight:700; font-size:13px; margin-bottom:2px;">Visible to customers</div>
+        <div style="font-size:11.5px; color:#8a7638;">Turn off to retire an item without deleting it</div>
+      </div>
+      <button id="visibleSwitch" type="button" class="switch on"><span class="knob"></span></button>
+    </div>
+
+  </div>
+  <div class="drawer-footer">
+    <button id="saveProductBtn" type="button">Save product</button>
+    <button id="cancelDrawerBtn" type="button" class="secondary">Cancel</button>
+  </div>
+</div>
+
+<script src="google.js"></script>
+<script src="products.js"></script>
+</body>
+</html>
