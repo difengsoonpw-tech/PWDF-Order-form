@@ -340,6 +340,12 @@ function doPost(e) {
       return jsonResponse(uploadProductPhoto(data, true));
     }
 
+    // Public — no login. Customers submit exactly the items in their cart
+    // and get back a price only for those, never the full price list.
+    if (action === "calculatecart") {
+      return jsonResponse(calculateCartTotal(data.items || []));
+    }
+
     const order = data.order || data;
     return jsonResponse(saveOrderObject(order, staff));
   } catch (err) {
@@ -746,6 +752,57 @@ function getProducts(isStaffRequest) {
     out.push(item);
   }
   return out;
+}
+
+/*****************************************************
+ * CART PRICING (public — no staff login required)
+ *
+ * The customer site never downloads the price list. Instead the browser
+ * sends exactly the items in the customer's own cart and gets back a
+ * price only for those — computed live from the PRODUCTS sheet, so it's
+ * always in sync with whatever staff set in the portal. This replaces the
+ * old approach of baking the entire wholesale price list into the
+ * customer-facing page's source code.
+ *
+ * "Decoration" is a small, already-customer-disclosed surcharge for cut
+ * Block/Slab cakes with the decoration add-on — same rule the site has
+ * always used, just computed here instead of in the browser.
+ *****************************************************/
+const DECORATION_SURCHARGE = {
+  "BLOCK CAKE": 10.50,
+  "SLAB CAKE": 10.50
+};
+const CART_CALC_MAX_ITEMS = 150;
+
+function calculateCartTotal(rawItems) {
+  var items = Array.isArray(rawItems) ? rawItems.slice(0, CART_CALC_MAX_ITEMS) : [];
+  var priceMap = getWholesalePrices();
+  var out = [];
+  var total = 0;
+
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i] || {};
+    var code = trimToLength(String(it.code || "").trim(), 60);
+    var qty = Math.max(0, Math.min(100000, Math.floor(Number(it.qty) || 0)));
+    var category = trimToLength(String(it.category || ""), 100);
+    var choice = trimToLength(String(it.choice || ""), PUBLIC_MAX_TEXT_LENGTH);
+    var hasAddon = !!it.addon;
+
+    var unitPrice = priceMap[code] || 0;
+    var lineTotal = unitPrice * qty;
+
+    var surcharge = DECORATION_SURCHARGE[category];
+    if (hasAddon && surcharge &&
+        ((category === "BLOCK CAKE" && choice.indexOf("45") !== -1) ||
+         (category === "SLAB CAKE" && choice.indexOf("90") !== -1))) {
+      lineTotal += surcharge * qty;
+    }
+
+    total += lineTotal;
+    out.push({ code: code, qty: qty, unitPrice: unitPrice, lineTotal: lineTotal });
+  }
+
+  return { success: true, items: out, total: total };
 }
 
 /** Wholesale prices keyed by code, for staff pricing. */
