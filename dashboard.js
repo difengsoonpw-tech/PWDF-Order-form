@@ -123,6 +123,7 @@ function renderOpNeededTable(orders) {
         <th>Customer</th>
         <th>Company</th>
         <th>Delivery Date</th>
+        <th>Delivery Area</th>
         <th>Items</th>
         <th></th>
       </tr>
@@ -137,6 +138,7 @@ function renderOpNeededTable(orders) {
       <td>${order.customer || "-"}</td>
       <td>${order.company || "-"}</td>
       <td>${order.deliveryDate || "-"}</td>
+      <td>${order.deliveryArea || "-"}</td>
       <td>${order.itemCount || 0}</td>
       <td class="actions"></td>
     `;
@@ -151,10 +153,32 @@ function renderOpNeededTable(orders) {
   opNeededContainer.appendChild(table);
 }
 
+const OP_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/* Same subject line convention used by the automatic email (see
+   buildOpEmailSubject in the backend) — e.g. "New order SADA Solutions
+   deliver 14/9 Monday" — so this manual fallback still lands in Operations'
+   inbox looking the same as every other order, whoever sent it. */
+function buildOpSubjectLine(order) {
+  const who = order.company || order.customer || "Customer";
+  const match = String(order.deliveryDate || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return `New order ${who} — ${order.orderRef}`;
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (isNaN(d.getTime())) return `New order ${who} — ${order.orderRef}`;
+  const iso = d.getDay() === 0 ? 7 : d.getDay();
+  return `New order ${who} deliver ${d.getDate()}/${d.getMonth() + 1} ${OP_WEEKDAY_NAMES[iso - 1]}`;
+}
+
 /* Builds the plain-text message staff paste into an email or WhatsApp to
-   Operations, using the same wording style as the rest of the site. */
+   Operations, using the same wording style as the rest of the site. The
+   subject line is included as the first line so this can be pasted
+   straight into an email as-is. */
 function buildOpMessage(order) {
-  let text = `📦 ORDER FOR OPERATIONS\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\nDelivery Date: ${order.deliveryDate || "-"}\n\nITEMS:\n`;
+  let text = `Subject: ${buildOpSubjectLine(order)}\n\n📦 ORDER FOR OPERATIONS\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\nDelivery Date: ${order.deliveryDate || "-"}\nDelivery Area: ${order.deliveryArea || "-"}\n`;
+  if (String(order.deliveryArea || "").indexOf("Other -") === 0) {
+    text += `\n⚠ This customer's area was NOT in our delivery schedule — please confirm the exact delivery day with them directly before dispatch.\n`;
+  }
+  text += `\nITEMS:\n`;
   (order.items || []).forEach(item => {
     text += `${item.qty || 0} x ${item.name || item.code || "-"}${item.remark ? ` (${item.remark})` : ""}\n`;
   });
@@ -271,6 +295,7 @@ function renderOrderTable(orders, container, isDraftList) {
         <th>Company</th>
         <th>Order Date</th>
         <th>Delivery Date</th>
+        <th>Delivery Area</th>
         <th>Status</th>
         <th>Sent to OP</th>
         <th>Actions</th>
@@ -291,6 +316,7 @@ function renderOrderTable(orders, container, isDraftList) {
       <td>${order.company || order.Company || "-"}</td>
       <td>${order.orderDate || order.OrderDate || order.createdDate || order.CreatedDate || "-"}</td>
       <td>${order.deliveryDate || order.DeliveryDate || "-"}</td>
+      <td>${order.deliveryArea || order.DeliveryArea || "-"}</td>
       <td><span class="status-pill ${getStatusClass(status)}">${status || "-"}</span></td>
       <td>${status === "Confirmed" ? (sentToOp ? `<span class="status-pill status-confirmed">✓ Sent${order.opSentDate ? " " + order.opSentDate : ""}</span>` : `<span class="status-pill status-draft">Not sent</span>`) : "—"}</td>
       <td class="actions"></td>

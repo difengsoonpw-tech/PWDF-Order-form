@@ -53,6 +53,203 @@ const popupTotal = document.getElementById("popupTotal");
 const customerName = document.getElementById("customerName");
 const brandName = document.getElementById("brandName");
 const contactNumber = document.getElementById("contactNumber");
+const deliveryDateInput = document.getElementById("deliveryDateInput");
+const deliveryDateHint = document.getElementById("deliveryDateHint");
+const deliveryAreaSelect = document.getElementById("deliveryAreaSelect");
+const deliveryAreaHint = document.getElementById("deliveryAreaHint");
+
+/* Delivery date rules come from the server (see getdeliveryrules in the
+   backend) so the picker and the actual save-order check never drift apart.
+   Sensible fallback defaults are used until that call comes back, or if it
+   fails — the server has the final say either way. */
+let DELIVERY_RULES = { leadWorkingDays: 3, closedWeekdayIso: 7, cutoffHour: 12, cutoffMinute: 30, pastCutoffNow: false, earliestDate: "" };
+
+/* The list of delivery areas (see getdeliveryareas in the backend) — each
+   area already comes with its actual allowed delivery weekdays computed
+   server-side (pickup day + outstation/local offset, Sunday excluded), so
+   the browser never has to re-derive the pickup/offset rule itself, only
+   mirror the same lead-time-plus-weekday arithmetic once an area is picked. */
+let DELIVERY_AREAS = [];
+let SELECTED_DELIVERY_AREA = null;
+
+/* The Company Name -> Delivery Area directory (see getcustomers in the
+   backend, and the staff-maintained CUSTOMERS sheet behind it, built from
+   a Business Central export). Lets a returning customer's delivery area
+   fill in automatically once they type their brand name, instead of
+   asking them to make sense of the (staff-oriented) area dropdown
+   themselves. A brand-new lead not yet in the sheet just sees the normal
+   manual picker — this is purely a shortcut, nothing depends on it. */
+let CUSTOMER_DIRECTORY = [];
+
+async function loadCustomerDirectory() {
+  const result = await getFromGoogleApi({ action: "getcustomers" });
+  if (result && result.success && Array.isArray(result.customers)) {
+    CUSTOMER_DIRECTORY = result.customers;
+  }
+  renderBrandNameSuggestions();
+}
+
+function renderBrandNameSuggestions() {
+  const list = document.getElementById("brandNameList");
+  if (!list) return;
+  list.innerHTML = CUSTOMER_DIRECTORY.map(c => `<option value="${escapeHtml(c.company)}"></option>`).join("");
+}
+
+function findKnownCustomer(companyTyped) {
+  const norm = String(companyTyped || "").trim().toLowerCase();
+  if (!norm) return null;
+  return CUSTOMER_DIRECTORY.find(c => c.company.trim().toLowerCase() === norm) || null;
+}
+
+/* Fires as the customer types/selects their brand name. If it exactly
+   matches a known company (case-insensitive) AND that company's saved
+   area is still one of the areas we currently offer, the delivery area
+   is decided automatically — the customer just sees a confirmed line of
+   text, no dropdown at all, so there's nothing for them to misread or
+   pick wrong. A brand-new lead not yet in the CUSTOMERS sheet still gets
+   the normal manual picker, since the system has nothing to match yet. */
+function onBrandNameChange() {
+  const pickerBlock = document.getElementById("deliveryAreaPickerBlock");
+  const confirmedBlock = document.getElementById("deliveryAreaConfirmedBlock");
+  const confirmedText = document.getElementById("deliveryAreaConfirmedText");
+  const match = findKnownCustomer(brandName.value);
+  const stillOffered = match && DELIVERY_AREAS.some(a => a.id === match.areaId);
+
+  if (stillOffered && deliveryAreaSelect) {
+    deliveryAreaSelect.value = match.areaId;
+    onDeliveryAreaChange();
+    if (confirmedText) confirmedText.textContent = match.areaLabel;
+    if (confirmedBlock) confirmedBlock.hidden = false;
+    if (pickerBlock) pickerBlock.hidden = true;
+  } else {
+    if (confirmedBlock) confirmedBlock.hidden = true;
+    if (pickerBlock) pickerBlock.hidden = false;
+  }
+}
+
+async function loadDeliveryRules() {
+  const result = await getFromGoogleApi({ action: "getdeliveryrules" });
+  if (result && result.success) {
+    DELIVERY_RULES = result;
+  }
+}
+
+async function loadDeliveryAreas() {
+  const result = await getFromGoogleApi({ action: "getdeliveryareas" });
+  if (result && result.success && Array.isArray(result.areas)) {
+    DELIVERY_AREAS = result.areas;
+  }
+  renderDeliveryAreaOptions();
+}
+
+function renderDeliveryAreaOptions() {
+  if (!deliveryAreaSelect) return;
+  if (!DELIVERY_AREAS.length) {
+    deliveryAreaSelect.innerHTML = `<option value="">Could not load delivery areas — please refresh</option>`;
+    return;
+  }
+
+  let html = `<option value="">Select your delivery area…</option>`;
+  let currentGroup = null;
+  DELIVERY_AREAS.forEach(area => {
+    if (area.state !== currentGroup) {
+      if (currentGroup !== null) html += `</optgroup>`;
+      html += `<optgroup label="${escapeHtml(area.state)}">`;
+      currentGroup = area.state;
+    }
+    html += `<option value="${escapeHtml(area.id)}">${escapeHtml(area.area)}</option>`;
+  });
+  if (currentGroup !== null) html += `</optgroup>`;
+  deliveryAreaSelect.innerHTML = html;
+}
+
+/* Mirrors computeEarliestDeliveryDateForArea() on the backend exactly, so
+   the date picker can auto-fill and validate instantly without a round
+   trip — the server still re-checks everything on submit regardless.
+   DELIVERY_RULES.pastCutoffNow comes straight from the server (it already
+   knows whether "now" is past the 12:30pm business-time cutoff), so the
+   browser never has to work out the cutoff itself from the visitor's own
+   clock/timezone — it just adds the extra day the server already decided on. */
+function computeEarliestDateForAreaClient(area) {
+  if (!area || !Array.isArray(area.allowedWeekdaysIso) || !area.allowedWeekdaysIso.length) return "";
+  const pad = n => String(n).padStart(2, "0");
+  let date = new Date();
+  if (DELIVERY_RULES.pastCutoffNow) {
+    date = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+  }
+  let workingDaysCounted = 0;
+  for (let guard = 0; guard < 90; guard++) {
+    date = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+    const isoWeekday = date.getDay() === 0 ? 7 : date.getDay();
+    const isClosed = isoWeekday === DELIVERY_RULES.closedWeekdayIso;
+    if (!isClosed) workingDaysCounted++;
+    if (workingDaysCounted >= DELIVERY_RULES.leadWorkingDays && !isClosed) {
+      if (area.allowedWeekdaysIso.indexOf(isoWeekday) !== -1) {
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      }
+    }
+  }
+  return "";
+}
+
+const WEEKDAY_ISO_NAMES_CLIENT = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+function isoWeekdayNameClient(iso) {
+  return WEEKDAY_ISO_NAMES_CLIENT[iso - 1] || "";
+}
+
+function onDeliveryAreaChange() {
+  if (!deliveryAreaSelect) return;
+  const areaId = deliveryAreaSelect.value;
+  SELECTED_DELIVERY_AREA = DELIVERY_AREAS.find(a => a.id === areaId) || null;
+
+  if (!SELECTED_DELIVERY_AREA) {
+    if (deliveryDateInput) {
+      deliveryDateInput.disabled = true;
+      deliveryDateInput.value = "";
+    }
+    if (deliveryDateHint) deliveryDateHint.textContent = "Please choose a delivery area first.";
+    return;
+  }
+
+  const earliest = computeEarliestDateForAreaClient(SELECTED_DELIVERY_AREA);
+  const dayNames = SELECTED_DELIVERY_AREA.allowedWeekdaysIso.map(isoWeekdayNameClient).join(", ");
+
+  if (deliveryDateInput) {
+    deliveryDateInput.disabled = false;
+    if (earliest) deliveryDateInput.min = earliest;
+    // Auto-fill / correct the date so customers aren't left guessing which
+    // days are valid — they can still change it, as long as it's allowed.
+    if (!deliveryDateInput.value || !isValidDeliveryDateClient(deliveryDateInput.value)) {
+      deliveryDateInput.value = earliest;
+    }
+  }
+  if (deliveryDateHint) {
+    const cutoffNote = DELIVERY_RULES.pastCutoffNow
+      ? ` (today's cutoff for new orders has passed, so counting starts from tomorrow)`
+      : "";
+    if (SELECTED_DELIVERY_AREA.id === "OTHER") {
+      deliveryDateHint.textContent = earliest
+        ? `We'll confirm your exact delivery day with you directly. Earliest possible date auto-filled below${cutoffNote}.`
+        : `Sorry, there is no available delivery day right now.`;
+    } else {
+      deliveryDateHint.textContent = earliest
+        ? `This area delivers on: ${dayNames}. Earliest available date auto-filled below${cutoffNote}.`
+        : `Sorry, this area currently has no available delivery day.`;
+    }
+  }
+}
+
+function isValidDeliveryDateClient(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parts = value.split("-").map(Number);
+  const picked = new Date(parts[0], parts[1] - 1, parts[2]);
+  if (isNaN(picked.getTime())) return false;
+  const isoWeekday = picked.getDay() === 0 ? 7 : picked.getDay();
+  if (isoWeekday === DELIVERY_RULES.closedWeekdayIso) return false;
+  if (DELIVERY_RULES.earliestDate && value < DELIVERY_RULES.earliestDate) return false;
+  if (SELECTED_DELIVERY_AREA && SELECTED_DELIVERY_AREA.allowedWeekdaysIso.indexOf(isoWeekday) === -1) return false;
+  return true;
+}
 
 function formatMoney(n) {
   return "RM " + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -414,16 +611,30 @@ function buildText() {
     alert("Please fill in Customer Name, Brand Name and Contact Number.");
     return null;
   }
+  if (!SELECTED_DELIVERY_AREA) {
+    alert("Please select your delivery area.");
+    return null;
+  }
+  if (!isValidDeliveryDateClient(deliveryDateInput.value)) {
+    const dayNames = SELECTED_DELIVERY_AREA.allowedWeekdaysIso.map(isoWeekdayNameClient).join(", ");
+    alert(`Please choose a valid delivery date — at least ${DELIVERY_RULES.leadWorkingDays} working days from today, not a Sunday (we're closed), and matching your area's delivery day(s): ${dayNames}.`);
+    return null;
+  }
   CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
 
-  let text = `✅ ORDER CONFIRMATION\n\nOrder Ref: ${CURRENT_ORDER_REF}\n\nCustomer: ${customerName.value}\nBrand: ${brandName.value}\nContact: ${contactNumber.value}\n\nITEMS:\n`;
+  const areaLabel = `${SELECTED_DELIVERY_AREA.state} - ${SELECTED_DELIVERY_AREA.area}`;
+  let text = `✅ ORDER CONFIRMATION\n\nOrder Ref: ${CURRENT_ORDER_REF}\n\nCustomer: ${customerName.value}\nBrand: ${brandName.value}\nContact: ${contactNumber.value}\nDelivery Area: ${areaLabel}\nDelivery Date: ${deliveryDateInput.value}\n\nITEMS:\n`;
 
   CART.forEach((line, key) => {
     const pricing = LAST_PRICING.byKey[key] || { lineTotal: 0 };
     text += `${line.qty} x ${line.name}${line.choice ? ` (${line.choice})` : ""}${line.addon ? ` - ${line.addon}` : ""} | ${formatMoney(pricing.lineTotal)}\n`;
   });
 
-  text += `\n-------------------------\nTOTAL PRICE (indicative): ${formatMoney(LAST_PRICING.total)}\n\n${ORDER_POLICY_TEXT}`;
+  text += `\n-------------------------\nTOTAL PRICE (indicative): ${formatMoney(LAST_PRICING.total)}\n`;
+  if (SELECTED_DELIVERY_AREA.id === "OTHER") {
+    text += `\n📌 Note: Your area isn't on our standard delivery schedule yet — our team will contact you to confirm the exact delivery day.\n`;
+  }
+  text += `\n${ORDER_POLICY_TEXT}`;
   return text;
 }
 
@@ -449,7 +660,8 @@ async function saveOrderToGoogleSheet() {
     customer: customerName.value,
     company: brandName.value,
     contact: contactNumber.value,
-    deliveryDate: "",
+    deliveryDate: deliveryDateInput.value,
+    deliveryArea: SELECTED_DELIVERY_AREA ? SELECTED_DELIVERY_AREA.id : "",
     status: "Draft",
     orderJson: JSON.stringify(items),
     items,
@@ -506,5 +718,15 @@ if (searchInput) {
 }
 if (reviewBtnDesktop) reviewBtnDesktop.addEventListener("click", openOrderReview);
 if (reviewBtnMobile) reviewBtnMobile.addEventListener("click", openOrderReview);
+if (deliveryAreaSelect) deliveryAreaSelect.addEventListener("change", onDeliveryAreaChange);
+if (brandName) {
+  brandName.addEventListener("input", onBrandNameChange);
+  brandName.addEventListener("change", onBrandNameChange);
+}
 
-document.addEventListener("DOMContentLoaded", loadProducts);
+document.addEventListener("DOMContentLoaded", () => {
+  loadProducts();
+  loadDeliveryRules();
+  loadDeliveryAreas();
+  loadCustomerDirectory();
+});

@@ -368,8 +368,24 @@ a { color: inherit; }
 
     <h3>Customer details</h3>
     <input id="customerName" placeholder="Customer Name">
-    <input id="brandName" placeholder="Brand Name">
+    <input id="brandName" placeholder="Brand Name" list="brandNameList" autocomplete="off">
+    <datalist id="brandNameList"></datalist>
     <input id="contactNumber" placeholder="Contact Number">
+    <div id="deliveryAreaPickerBlock">
+      <label for="deliveryAreaSelect" style="display:block; font-size:12px; font-weight:700; color:#6a5a2c; margin:2px 0 4px;">Delivery Area</label>
+      <select id="deliveryAreaSelect">
+        <option value="">Loading delivery areas…</option>
+      </select>
+      <div id="deliveryAreaHint" style="font-size:11.5px; color:#9a8a55; margin:-2px 0 10px;">Choose the area closest to your delivery address — this decides which day(s) we can deliver.</div>
+    </div>
+    <div id="deliveryAreaConfirmedBlock" hidden style="margin:2px 0 10px;">
+      <label style="display:block; font-size:12px; font-weight:700; color:#6a5a2c; margin:2px 0 4px;">Delivery Area</label>
+      <div id="deliveryAreaConfirmedText" style="font-size:14px; font-weight:600; color:#2a2118; background:#eef7ee; border:1px solid #bfe3bf; border-radius:6px; padding:9px 11px;"></div>
+      <div style="font-size:11.5px; color:#3a7a3a; margin-top:4px;">✓ Matched automatically from your account.</div>
+    </div>
+    <label for="deliveryDateInput" style="display:block; font-size:12px; font-weight:700; color:#6a5a2c; margin:2px 0 4px;">Delivery Date</label>
+    <input id="deliveryDateInput" type="date" disabled>
+    <div id="deliveryDateHint" style="font-size:11.5px; color:#9a8a55; margin:-6px 0 10px;">Please choose a delivery area first.</div>
 
     <h3>Your order</h3>
     <div id="popupSummary"></div>
