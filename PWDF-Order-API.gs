@@ -621,6 +621,25 @@ function getCustomerDirectory() {
   return out;
 }
 
+/**
+ * Looks up ONE company by exact name (case/whitespace tolerant) and
+ * returns just that customer's area, or null if there's no match.
+ *
+ * Deliberately does NOT expose the full customer directory over the
+ * network — a customer typing their own company name only ever gets
+ * their own match back, never the list of every other customer, brand
+ * name, or delivery area on file. This is the only public-facing way to
+ * reach the BC_CUSTOMERS sheet's data; there is no action that returns
+ * the whole list to an unauthenticated caller.
+ */
+function findCustomerMatch(companyTyped) {
+  const norm = String(companyTyped || "").trim().toLowerCase();
+  if (!norm) return null;
+  const found = getCustomerDirectory().find(c => c.company.trim().toLowerCase() === norm);
+  if (!found) return null;
+  return { areaId: found.areaId, areaLabel: found.areaLabel };
+}
+
 /*****************************************************
  * GET REQUEST
  *****************************************************/
@@ -698,14 +717,16 @@ function doGet(e) {
     });
   }
 
-  // Public — the Company Name -> Delivery Area directory (staff-maintained,
-  // see the BC_CUSTOMERS sheet), so a returning customer's area can be filled
-  // in automatically instead of asking them to pick from the area dropdown.
-  // Deliberately returns nothing but company name + area — no contact info,
-  // no customer code, no address. Rows whose Delivery Area doesn't match a
-  // known label are skipped rather than sent with a broken area id.
-  if (action === "getcustomers") {
-    return jsonResponse({ success: true, customers: getCustomerDirectory() });
+  // Public — looks up ONE company by the exact name typed into the Brand
+  // Name field (staff-maintained directory, see the BC_CUSTOMERS sheet),
+  // so a returning customer's area can be filled in automatically instead
+  // of asking them to pick from the area dropdown. Deliberately returns
+  // only that one company's own match (or null) — NEVER the full customer
+  // list. There is no action anywhere that hands the whole BC_CUSTOMERS
+  // directory to an unauthenticated caller; every other customer's name
+  // and delivery area stays private.
+  if (action === "matchcustomer") {
+    return jsonResponse({ success: true, match: findCustomerMatch(params.company || "") });
   }
 
   // ---- Everything below requires the staff token ----

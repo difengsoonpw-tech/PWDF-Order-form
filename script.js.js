@@ -72,47 +72,51 @@ let DELIVERY_RULES = { leadWorkingDays: 3, closedWeekdayIso: 7, cutoffHour: 12, 
 let DELIVERY_AREAS = [];
 let SELECTED_DELIVERY_AREA = null;
 
-/* The Company Name -> Delivery Area directory (see getcustomers in the
-   backend, and the staff-maintained CUSTOMERS sheet behind it, built from
-   a Business Central export). Lets a returning customer's delivery area
-   fill in automatically once they type their brand name, instead of
+/* Brand Name -> Delivery Area auto-match (see matchcustomer in the
+   backend, and the staff-maintained BC_CUSTOMERS sheet behind it, built
+   from a Business Central export). Lets a returning customer's delivery
+   area fill in automatically once they type their brand name, instead of
    asking them to make sense of the (staff-oriented) area dropdown
    themselves. A brand-new lead not yet in the sheet just sees the normal
-   manual picker — this is purely a shortcut, nothing depends on it. */
-let CUSTOMER_DIRECTORY = [];
+   manual picker — this is purely a shortcut, nothing depends on it.
 
-async function loadCustomerDirectory() {
-  const result = await getFromGoogleApi({ action: "getcustomers" });
-  if (result && result.success && Array.isArray(result.customers)) {
-    CUSTOMER_DIRECTORY = result.customers;
-  }
-  renderBrandNameSuggestions();
-}
+   Deliberately, the full list of company names is NEVER downloaded to the
+   browser (no autocomplete/suggestion list) — each keystroke-pause only
+   asks the server "does THIS exact name match anyone?" and gets back just
+   that one answer. A customer typing here can never see, browse, or
+   discover any other customer's name or delivery area. */
+let brandMatchDebounceTimer = null;
+let brandMatchRequestSeq = 0;
 
-function renderBrandNameSuggestions() {
-  const list = document.getElementById("brandNameList");
-  if (!list) return;
-  list.innerHTML = CUSTOMER_DIRECTORY.map(c => `<option value="${escapeHtml(c.company)}"></option>`).join("");
-}
-
-function findKnownCustomer(companyTyped) {
-  const norm = String(companyTyped || "").trim().toLowerCase();
-  if (!norm) return null;
-  return CUSTOMER_DIRECTORY.find(c => c.company.trim().toLowerCase() === norm) || null;
-}
-
-/* Fires as the customer types/selects their brand name. If it exactly
-   matches a known company (case-insensitive) AND that company's saved
-   area is still one of the areas we currently offer, the delivery area
-   is decided automatically — the customer just sees a confirmed line of
-   text, no dropdown at all, so there's nothing for them to misread or
-   pick wrong. A brand-new lead not yet in the CUSTOMERS sheet still gets
-   the normal manual picker, since the system has nothing to match yet. */
 function onBrandNameChange() {
+  if (brandMatchDebounceTimer) clearTimeout(brandMatchDebounceTimer);
+  const typedNow = brandName.value;
+  brandMatchDebounceTimer = setTimeout(() => checkBrandNameMatch(typedNow), 400);
+}
+
+async function checkBrandNameMatch(companyTyped) {
   const pickerBlock = document.getElementById("deliveryAreaPickerBlock");
   const confirmedBlock = document.getElementById("deliveryAreaConfirmedBlock");
   const confirmedText = document.getElementById("deliveryAreaConfirmedText");
-  const match = findKnownCustomer(brandName.value);
+  const norm = String(companyTyped || "").trim();
+
+  if (!norm) {
+    if (confirmedBlock) confirmedBlock.hidden = true;
+    if (pickerBlock) pickerBlock.hidden = false;
+    return;
+  }
+
+  const seq = ++brandMatchRequestSeq;
+  const result = await getFromGoogleApi({ action: "matchcustomer", company: norm });
+
+  // If the customer kept typing while this request was in flight, a newer
+  // request has already started — ignore this now-stale response so it
+  // can't clobber a more recent (or since-cleared) result.
+  if (seq !== brandMatchRequestSeq) return;
+  // Also bail out if the field no longer holds what we asked about.
+  if (brandName.value !== companyTyped) return;
+
+  const match = result && result.success ? result.match : null;
   const stillOffered = match && DELIVERY_AREAS.some(a => a.id === match.areaId);
 
   if (stillOffered && deliveryAreaSelect) {
@@ -728,5 +732,4 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProducts();
   loadDeliveryRules();
   loadDeliveryAreas();
-  loadCustomerDirectory();
 });
