@@ -13,6 +13,8 @@ const dateFilterBtn = document.getElementById("dateFilterBtn");
 const dateInput = document.getElementById("dateInput");
 const searchResults = document.getElementById("searchResults");
 const draftContainer = document.getElementById("draftContainer");
+const opNeededContainer = document.getElementById("opNeededContainer");
+const opNeededCount = document.getElementById("opNeededCount");
 
 function isStaffLoggedIn() {
   // The token itself is the credential — if we hold one, we are logged in.
@@ -24,6 +26,7 @@ function requireStaffLogin() {
     loginPanel.classList.add("hidden");
     dashboardPanel.classList.remove("hidden");
     logoutBtn.classList.remove("hidden");
+    loadOpNeeded();
     loadDraftOrders();
     renderSearchResults([]);
   } else {
@@ -87,6 +90,114 @@ async function loadDraftOrders() {
   }
   draftContainer.innerHTML = "";
   renderOrderTable(orders, draftContainer, true);
+}
+
+/*****************************************************
+ * "AWAITING OPERATIONS" CHECKLIST
+ *
+ * A Confirmed order that hasn't been marked sent yet means nobody has told
+ * the Operations/kitchen team about it. This list is deliberately shown at
+ * the very top of the dashboard so it can't be missed.
+ *****************************************************/
+async function loadOpNeeded() {
+  opNeededContainer.innerHTML = "<p>Loading…</p>";
+  const orders = await fetchOrdersNeedingOp() || [];
+  if (!orders.length) {
+    opNeededContainer.innerHTML = "<p>✓ Nothing waiting — every confirmed order has been sent to Operations.</p>";
+    opNeededCount.textContent = "";
+    opNeededCount.classList.add("hidden");
+    return;
+  }
+  opNeededCount.textContent = orders.length;
+  opNeededCount.classList.remove("hidden");
+  renderOpNeededTable(orders);
+}
+
+function renderOpNeededTable(orders) {
+  const table = document.createElement("table");
+  table.className = "order-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Order Ref</th>
+        <th>Customer</th>
+        <th>Company</th>
+        <th>Delivery Date</th>
+        <th>Items</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  orders.forEach(order => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${order.orderRef || "-"}</td>
+      <td>${order.customer || "-"}</td>
+      <td>${order.company || "-"}</td>
+      <td>${order.deliveryDate || "-"}</td>
+      <td>${order.itemCount || 0}</td>
+      <td class="actions"></td>
+    `;
+    const actions = row.querySelector(".actions");
+    const sendBtn = document.createElement("button");
+    sendBtn.textContent = "📋 Copy & mark sent to OP";
+    sendBtn.onclick = () => copyAndMarkSentToOp(order.orderRef);
+    actions.appendChild(sendBtn);
+    tbody.appendChild(row);
+  });
+  opNeededContainer.innerHTML = "";
+  opNeededContainer.appendChild(table);
+}
+
+/* Builds the plain-text message staff paste into an email or WhatsApp to
+   Operations, using the same wording style as the rest of the site. */
+function buildOpMessage(order) {
+  let text = `📦 ORDER FOR OPERATIONS\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\nDelivery Date: ${order.deliveryDate || "-"}\n\nITEMS:\n`;
+  (order.items || []).forEach(item => {
+    text += `${item.qty || 0} x ${item.name || item.code || "-"}${item.remark ? ` (${item.remark})` : ""}\n`;
+  });
+  text += `\n(Confirmed by Sales — please proceed with preparation.)`;
+  return text;
+}
+
+/* Copies the OP-ready message to the clipboard (falling back to a visible
+   prompt if the clipboard API isn't available) and marks the order sent —
+   both in one click, so the step is never forgotten. */
+async function copyAndMarkSentToOp(orderRef) {
+  const order = await fetchOrder(orderRef);
+  if (!order) {
+    alert("Could not load this order's details.");
+    return;
+  }
+  const text = buildOpMessage(order);
+
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  } catch (err) {
+    copied = false;
+  }
+
+  if (!copied) {
+    window.prompt("Could not copy automatically — select all the text below (it's already highlighted) and copy it manually:", text);
+  }
+
+  const result = await sendOrderToOp(orderRef, true);
+  if (!result || result.success !== true) {
+    alert("Copied the message, but could not mark this order as sent — please try clicking the button again.");
+    return;
+  }
+
+  if (copied) {
+    alert("Copied! Paste it into your email or WhatsApp to Operations.\n\nMarked as sent — it will drop off this list.");
+  }
+  await loadOpNeeded();
+  await loadDraftOrders();
 }
 
 async function handleSearch() {
@@ -161,6 +272,7 @@ function renderOrderTable(orders, container, isDraftList) {
         <th>Order Date</th>
         <th>Delivery Date</th>
         <th>Status</th>
+        <th>Sent to OP</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -168,38 +280,60 @@ function renderOrderTable(orders, container, isDraftList) {
   `;
   const tbody = table.querySelector("tbody");
   orders.forEach(order => {
+    const orderRef = order.orderRef || order.OrderRef;
+    const status = order.status || order.Status;
+    const sentToOp = !!(order.sentToOp || order.opSentDate);
+
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${order.orderRef || order.OrderRef || "-"}</td>
+      <td>${orderRef || "-"}</td>
       <td>${order.customer || order.Customer || "-"}</td>
       <td>${order.company || order.Company || "-"}</td>
       <td>${order.orderDate || order.OrderDate || order.createdDate || order.CreatedDate || "-"}</td>
       <td>${order.deliveryDate || order.DeliveryDate || "-"}</td>
-      <td><span class="status-pill ${getStatusClass(order.status || order.Status)}">${order.status || order.Status || "-"}</span></td>
+      <td><span class="status-pill ${getStatusClass(status)}">${status || "-"}</span></td>
+      <td>${status === "Confirmed" ? (sentToOp ? `<span class="status-pill status-confirmed">✓ Sent${order.opSentDate ? " " + order.opSentDate : ""}</span>` : `<span class="status-pill status-draft">Not sent</span>`) : "—"}</td>
       <td class="actions"></td>
     `;
     const actions = row.querySelector(".actions");
     const openBtn = document.createElement("button");
     openBtn.textContent = "Open";
-    openBtn.onclick = () => openOrder(order.orderRef || order.OrderRef);
+    openBtn.onclick = () => openOrder(orderRef);
     actions.appendChild(openBtn);
 
     const editBtn = document.createElement("button");
     editBtn.textContent = "Edit";
-    editBtn.onclick = () => openOrder(order.orderRef || order.OrderRef);
+    editBtn.onclick = () => openOrder(orderRef);
     actions.appendChild(editBtn);
 
-    if (order.status === "Draft" || order.Status === "Draft") {
+    if (status === "Draft") {
       const confirmBtn = document.createElement("button");
       confirmBtn.textContent = "Confirm";
-      confirmBtn.onclick = () => confirmOrder(order.orderRef || order.OrderRef);
+      confirmBtn.onclick = () => confirmOrder(orderRef);
       actions.appendChild(confirmBtn);
 
       const cancelBtn = document.createElement("button");
       cancelBtn.textContent = "Cancel";
-      cancelBtn.onclick = () => cancelOrder(order.orderRef || order.OrderRef);
+      cancelBtn.onclick = () => cancelOrder(orderRef);
       actions.appendChild(cancelBtn);
     }
+
+    if (status === "Confirmed") {
+      const opBtn = document.createElement("button");
+      opBtn.textContent = sentToOp ? "Undo sent-to-OP" : "📋 Copy & mark sent to OP";
+      opBtn.onclick = async () => {
+        if (sentToOp) {
+          if (!confirm("Mark this order as NOT yet sent to Operations?")) return;
+          await sendOrderToOp(orderRef, false);
+          await loadOpNeeded();
+          renderSearchResults(await searchOrders(orderRef));
+        } else {
+          await copyAndMarkSentToOp(orderRef);
+        }
+      };
+      actions.appendChild(opBtn);
+    }
+
     tbody.appendChild(row);
   });
   container.innerHTML = "";

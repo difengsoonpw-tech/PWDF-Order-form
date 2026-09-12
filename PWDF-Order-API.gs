@@ -34,8 +34,13 @@ const HEADER_COLUMNS = [
   "CreatedDate",
   "DeliveryDate",
   "Status",
-  "ItemCount"
+  "ItemCount",
+  "OpSentDate"
 ];
+
+// Column position (1-based) of OpSentDate — blank means "not yet sent to
+// Operations", any value means "sent" (we store the timestamp it was sent).
+const OP_SENT_COLUMN = 9;
 
 const DETAIL_COLUMNS = ["OrderRef", "Code", "Name", "Remark", "Qty"];
 
@@ -219,7 +224,23 @@ function ensureSettingsSheet(settingSheet) {
 }
 
 function getHeaderSheet() {
-  return getSheetOrCreate(SHEET_HEADER, HEADER_COLUMNS);
+  const sheet = getSheetOrCreate(SHEET_HEADER, HEADER_COLUMNS);
+  ensureOpSentColumn(sheet);
+  return sheet;
+}
+
+/**
+ * One-time, self-healing migration: older sheets were created before the
+ * "OpSentDate" column existed. If the header row doesn't have it yet, add
+ * it — this never touches any existing order data.
+ */
+function ensureOpSentColumn(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol >= OP_SENT_COLUMN) {
+    const existingHeader = String(sheet.getRange(1, OP_SENT_COLUMN).getValue() || "").trim();
+    if (existingHeader) return; // already there
+  }
+  sheet.getRange(1, OP_SENT_COLUMN).setValue("OpSentDate");
 }
 
 function getDetailSheet() {
@@ -287,6 +308,9 @@ function doGet(e) {
     case "getdraftorders":
       return jsonResponse(fetchDraftOrders());
 
+    case "getneedop":
+      return jsonResponse(getOrdersNeedingOp());
+
     case "getprices":
       return jsonResponse({ success: true, prices: getWholesalePrices() });
 
@@ -328,6 +352,11 @@ function doPost(e) {
     if (action === "updateorder") {
       if (!staff) return unauthorizedResponse();
       return updateOrder(data.orderRef || "", data.updates || {});
+    }
+
+    if (action === "sendtoop") {
+      if (!staff) return unauthorizedResponse();
+      return jsonResponse(markSentToOp(data.orderRef || "", data.sent !== false));
     }
 
     if (action === "saveproduct") {
@@ -404,7 +433,8 @@ function saveOrderObject(rawData, isStaffRequest) {
       new Date(),
       data.deliveryDate || "",
       status,
-      items.length
+      items.length,
+      "" // OpSentDate — blank until staff explicitly marks it sent to Operations
     ]);
   }
 
@@ -497,6 +527,8 @@ function searchOrders(query) {
     deliveryDate: row[5],
     status: row[6],
     itemCount: row[7],
+    opSentDate: row[8] ? formatSheetDate(row[8]) : "",
+    sentToOp: !!row[8],
     rowValues: row.map(cell => String(cell || "").toLowerCase())
   }));
 
@@ -571,7 +603,9 @@ function getOrdersByDate(dateStr) {
       orderDate: formatSheetDate(row[4]),
       deliveryDate: formatSheetDate(row[5]),
       status: row[6],
-      itemCount: row[7]
+      itemCount: row[7],
+      opSentDate: row[8] ? formatSheetDate(row[8]) : "",
+      sentToOp: !!row[8]
     }))
     .filter(o => (o.orderDate || "").indexOf(dateNorm) !== -1);
 }
@@ -613,6 +647,8 @@ function fetchOrder(orderRef) {
     deliveryDate: orderRow[5],
     status: orderRow[6],
     itemCount: orderRow[7],
+    opSentDate: orderRow[8] ? formatSheetDate(orderRow[8]) : "",
+    sentToOp: !!orderRow[8],
     items: items
   };
 }
@@ -633,9 +669,100 @@ function fetchDraftOrders() {
       createdDate: row[4],
       deliveryDate: row[5],
       status: row[6],
-      itemCount: row[7]
+      itemCount: row[7],
+      opSentDate: row[8] ? formatSheetDate(row[8]) : "",
+      sentToOp: !!row[8]
     }))
     .filter(order => String(order.status || "").toLowerCase() === "draft");
+}
+
+/*****************************************************
+ * ORDERS AWAITING OPERATIONS  (staff only — enforced in doGet)
+ *
+ * A "Confirmed" order (sales has agreed it with the customer) that has no
+ * OpSentDate yet means nobody has told the kitchen/Operations team about it.
+ * This is the checklist that stops an order silently falling through the
+ * cracks between "confirmed with customer" and "actually being made".
+ *****************************************************/
+function getOrdersNeedingOp() {
+  const header = getHeaderSheet();
+  const rows = getDataRows(header, HEADER_COLUMNS);
+
+  return rows
+    .map(row => ({
+      orderRef: row[0],
+      customer: row[1],
+      company: row[2],
+      contact: row[3],
+      createdDate: row[4],
+      deliveryDate: row[5],
+      status: row[6],
+      itemCount: row[7],
+      opSentDate: row[8] ? formatSheetDate(row[8]) : "",
+      sentToOp: !!row[8]
+    }))
+    .filter(order => String(order.status || "").toLowerCase() === "confirmed" && !order.sentToOp);
+}
+
+/*****************************************************
+ * MARK / UNMARK SENT TO OPERATIONS  (staff only — enforced in doPost)
+ *****************************************************/
+function markSentToOp(orderRef, sent) {
+  const header = getHeaderSheet();
+  const rows = header.getDataRange().getValues();
+  let foundRow = null;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0] || "").toLowerCase() === String(orderRef || "").toLowerCase()) {
+      foundRow = i + 1;
+      break;
+    }
+  }
+
+  if (!foundRow) {
+    return { success: false, error: "Order not found" };
+  }
+
+  const value = sent ? new Date() : "";
+  header.getRange(foundRow, OP_SENT_COLUMN).setValue(value);
+
+  return {
+    success: true,
+    orderRef: orderRef,
+    sentToOp: !!sent,
+    opSentDate: sent ? formatSheetDate(value) : ""
+  };
+}
+
+/*****************************************************
+ * ONE-TIME CLEANUP — run this once, manually, from the Apps Script editor
+ * after adding this feature.
+ *
+ * Every order that was already "Confirmed" before this feature existed has
+ * a blank OpSentDate (the column didn't exist yet), so it would otherwise
+ * flood your new "Awaiting Operations" checklist with old orders you likely
+ * already told Operations about by hand. This backfills those old rows so
+ * only NEW confirmations show up on the checklist going forward.
+ *
+ * Safe to run more than once — it only ever fills in blanks, never
+ * overwrites a real OpSentDate.
+ *****************************************************/
+function backfillOpSentForExistingConfirmedOrders() {
+  const header = getHeaderSheet();
+  const values = header.getDataRange().getValues();
+  let updated = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const status = String(values[i][6] || "").toLowerCase();
+    const alreadySent = values[i][8];
+    if (status === "confirmed" && !alreadySent) {
+      header.getRange(i + 1, OP_SENT_COLUMN).setValue(values[i][4] || new Date());
+      updated++;
+    }
+  }
+
+  Logger.log("Backfilled OpSentDate for %s existing confirmed order(s).", updated);
+  return updated;
 }
 
 /*****************************************************

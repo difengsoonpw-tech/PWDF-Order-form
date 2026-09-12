@@ -98,3 +98,22 @@ async function fetchDraftOrders() {
     action: "getdraftorders"
   });
 }
+
+/* Confirmed orders that haven't been marked as sent to Operations yet —
+   the checklist that stops an order from being forgotten between "sales
+   confirmed it with the customer" and "the kitchen actually knows about it". */
+async function fetchOrdersNeedingOp() {
+  return await getFromGoogleApi({
+    action: "getneedop"
+  });
+}
+
+/* sent=true marks an order as sent to Operations (recording the moment);
+   sent=false undoes that, in case it was clicked by mistake. */
+async function sendOrderToOp(orderRef, sent = true) {
+  return await postToGoogleApi({
+    action: "sendtoop",
+    orderRef,
+    sent
+  });
+}

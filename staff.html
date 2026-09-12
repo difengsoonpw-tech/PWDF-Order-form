@@ -35,6 +35,11 @@ button.secondary { width:auto; background:transparent; color:#222222; border:1px
 .status-confirmed { background:rgba(34,139,34,0.15); color:#205b16; }
 .status-cancelled { background:rgba(189,23,23,0.15); color:#7a0d0d; }
 .hidden { display:none; }
+
+.op-needed-panel { background:#fff4e0; border:2px solid #e0a536; border-radius:18px; padding:20px; margin-bottom:20px; }
+.op-needed-panel h2 { margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+.op-count-badge { background:#c0451f; color:#fff; border-radius:999px; padding:2px 10px; font-size:13px; font-weight:700; }
+.op-needed-panel p { margin:6px 0 0; font-size:13.5px; color:#6a5a2c; }
 </style>
 </head>
 <body>
@@ -52,6 +57,11 @@ button.secondary { width:auto; background:transparent; color:#222222; border:1px
     <button id="loginBtn" type="button">Login</button>
   </div>
   <div id="dashboardPanel" class="dashboard-panel hidden">
+    <div class="op-needed-panel">
+      <h2>⚠️ Awaiting Operations <span id="opNeededCount" class="op-count-badge hidden"></span></h2>
+      <p>Confirmed orders that haven't been sent to the Operations team yet. Click the button to copy a ready-made message and mark it sent — in one click, so it's never missed.</p>
+      <div id="opNeededContainer">Loading…</div>
+    </div>
     <h2>Sales Management</h2>
     <div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
