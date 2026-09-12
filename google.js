@@ -71,10 +71,18 @@ async function postToGoogleApi(rawBody) {
   const body = withStaffToken(rawBody);
 
   try {
+    // NOTE: this is sent as "text/plain", not "application/json", on purpose.
+    // Google Apps Script web apps cannot answer the browser's CORS
+    // "preflight" check that "application/json" triggers, so that request
+    // was always guaranteed to fail first and only succeed via the fallback
+    // methods below. "text/plain" does not trigger a preflight check, so the
+    // very first request now succeeds directly - the backend (parsePostBody
+    // in the .gs file) already reads the raw text and parses it as JSON, so
+    // nothing server-side needed to change.
     const response = await fetch(API_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "text/plain;charset=utf-8"
       },
       body: JSON.stringify(body)
     });
