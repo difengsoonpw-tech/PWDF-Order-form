@@ -163,9 +163,16 @@ function renderProductList() {
     const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
     const initialChoice = choices.length ? choices[0] : "";
 
+    // Only ever request a photo that is a real web address (the ones uploaded
+    // via the staff portal's Drive photo tool). Older leftover values in the
+    // sheet like "MASTER_LIST_PHOTO/DP-C0008.JPG" are local filenames from the
+    // old system, not real links — requesting hundreds of those at once is
+    // what was making the whole page look stuck on "Loading".
+    const hasRealPhoto = /^https?:\/\//i.test(p.photo || "");
+
     row.innerHTML = `
-      ${p.photo
-        ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" onerror="this.outerHTML='<div class=&quot;product-thumb placeholder&quot;>no photo</div>'">`
+      ${hasRealPhoto
+        ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;product-thumb placeholder&quot;>no photo</div>'">`
         : `<div class="product-thumb placeholder">no photo</div>`}
       <div class="product-info">
         <div class="p-name">${escapeHtml(p.name || "(unnamed)")}</div>

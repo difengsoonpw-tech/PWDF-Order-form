@@ -40,6 +40,19 @@ const photoDropzone = document.getElementById("photoDropzone");
 const photoDropzoneText = document.getElementById("photoDropzoneText");
 const photoFileInput = document.getElementById("photoFileInput");
 
+const bulkUploadBtn = document.getElementById("bulkUploadBtn");
+const bulkOverlay = document.getElementById("bulkOverlay");
+const bulkDrawer = document.getElementById("bulkDrawer");
+const bulkCloseBtnTop = document.getElementById("bulkCloseBtnTop");
+const bulkCloseBtn = document.getElementById("bulkCloseBtn");
+const bulkDropzone = document.getElementById("bulkDropzone");
+const bulkDropzoneText = document.getElementById("bulkDropzoneText");
+const bulkFileInput = document.getElementById("bulkFileInput");
+const bulkStartBtn = document.getElementById("bulkStartBtn");
+const bulkCancelBtn = document.getElementById("bulkCancelBtn");
+const bulkSummary = document.getElementById("bulkSummary");
+const bulkProgressList = document.getElementById("bulkProgressList");
+
 let allProducts = [];   // full list from the server, staff view (has price + visible)
 let editingCode = null; // null while adding a new product
 
@@ -165,10 +178,15 @@ function renderTable() {
     const isVisible = p.visible !== false;
 
     const photoCell = document.createElement("td");
-    if (p.photo) {
+    // Only request a photo that's a real web address (uploaded via this portal).
+    // Older leftover values like "MASTER_LIST_PHOTO/DP-C0008.JPG" are local
+    // filenames, not links — requesting hundreds of those at once is what was
+    // slowing the whole table (and the customer page) down.
+    if (p.photo && /^https?:\/\//i.test(p.photo)) {
       const img = document.createElement("img");
       img.className = "product-thumb";
       img.src = p.photo;
+      img.loading = "lazy";
       img.alt = "";
       img.onerror = () => { img.replaceWith(placeholderThumb()); };
       photoCell.appendChild(img);
@@ -444,6 +462,153 @@ async function handleSaveProduct() {
   await loadProducts();
 }
 
+/*****************************************************
+ * BULK PHOTO UPLOAD
+ *
+ * Staff pick every photo at once (e.g. their whole MASTER_LIST_PHOTO
+ * folder). Each file must be named exactly like the product's code
+ * (BREAD-BG-B0004.jpg). We match it to the product already loaded in
+ * allProducts, resize it the same way as a single upload, send it to
+ * the same uploadphoto/saveproduct endpoints, and show progress live.
+ * No backend changes are needed for this feature.
+ *****************************************************/
+let bulkFiles = [];       // File objects chosen, image files only
+let bulkRunning = false;
+let bulkStopRequested = false;
+
+function findProductByCode(code) {
+  const target = String(code || "").trim().toUpperCase();
+  if (!target) return null;
+  return allProducts.find(p => String(p.code || "").trim().toUpperCase() === target) || null;
+}
+
+function fileBaseName(filename) {
+  return String(filename || "").replace(/\.[^.]+$/, "").trim();
+}
+
+function openBulkDrawer() {
+  bulkFiles = [];
+  bulkRunning = false;
+  bulkStopRequested = false;
+  bulkFileInput.value = "";
+  bulkDropzoneText.textContent = "📁 Click to choose photos, or drop them here";
+  bulkSummary.textContent = "";
+  bulkProgressList.innerHTML = "";
+  bulkStartBtn.disabled = true;
+  bulkCancelBtn.classList.add("hidden");
+  bulkOverlay.classList.remove("hidden");
+  bulkDrawer.classList.remove("hidden");
+}
+
+function closeBulkDrawer() {
+  if (bulkRunning && !confirm("An upload is still in progress. Stop it and close?")) return;
+  bulkStopRequested = true;
+  bulkOverlay.classList.add("hidden");
+  bulkDrawer.classList.add("hidden");
+  // Reflect any photos that were successfully attached while the drawer was open.
+  renderTable();
+}
+
+function handleBulkFilesChosen(fileList) {
+  const all = Array.from(fileList || []);
+  const images = all.filter(f => f.type && f.type.indexOf("image/") === 0);
+  const skippedNonImage = all.length - images.length;
+
+  bulkFiles = images;
+  renderBulkFileList();
+
+  bulkStartBtn.disabled = bulkFiles.length === 0;
+  bulkDropzoneText.textContent = `${bulkFiles.length} photo${bulkFiles.length === 1 ? "" : "s"} selected` +
+    (skippedNonImage ? ` (${skippedNonImage} non-image file${skippedNonImage === 1 ? "" : "s"} ignored)` : "");
+}
+
+function renderBulkFileList() {
+  bulkProgressList.innerHTML = "";
+  bulkFiles.forEach((file, i) => {
+    const row = document.createElement("div");
+    row.className = "bulk-row status-pending";
+    row.id = `bulkRow-${i}`;
+    row.innerHTML = `<span class="bulk-name">${escapeHtml(file.name)}</span><span class="bulk-status">Pending</span>`;
+    bulkProgressList.appendChild(row);
+  });
+  bulkSummary.textContent = bulkFiles.length ? `${bulkFiles.length} photo${bulkFiles.length === 1 ? "" : "s"} ready to upload.` : "";
+}
+
+function setBulkRowStatus(i, statusClass, label) {
+  const row = document.getElementById(`bulkRow-${i}`);
+  if (!row) return;
+  row.className = `bulk-row status-${statusClass}`;
+  row.querySelector(".bulk-status").textContent = label;
+}
+
+async function processBulkFile(file) {
+  const code = fileBaseName(file.name);
+  const product = findProductByCode(code);
+  if (!product) {
+    return { status: "nomatch", label: "✗ No matching product code" };
+  }
+
+  let resized;
+  try {
+    resized = await resizeImageForUpload(file);
+  } catch (err) {
+    return { status: "error", label: "✗ " + (err.message || "Could not read image") };
+  }
+
+  const uploadResult = await postToGoogleApi({
+    action: "uploadphoto",
+    filename: file.name,
+    mimeType: resized.mimeType,
+    dataBase64: resized.base64
+  });
+  if (!uploadResult || uploadResult.success !== true) {
+    return { status: "error", label: "✗ Upload failed: " + ((uploadResult && uploadResult.message) || "unknown error") };
+  }
+
+  const saveResult = await postToGoogleApi({
+    action: "saveproduct",
+    product: { code: product.code, photo: uploadResult.photo }
+  });
+  if (!saveResult || saveResult.success !== true) {
+    return { status: "error", label: "✗ Saved photo but could not attach it: " + ((saveResult && saveResult.message) || "unknown error") };
+  }
+
+  product.photo = uploadResult.photo; // keep our local cache in sync too
+  return { status: "success", label: "✓ Uploaded to " + product.code };
+}
+
+async function startBulkUpload() {
+  if (!bulkFiles.length || bulkRunning) return;
+  bulkRunning = true;
+  bulkStopRequested = false;
+  bulkStartBtn.disabled = true;
+  bulkCancelBtn.classList.remove("hidden");
+
+  let done = 0, success = 0, nomatch = 0, error = 0;
+
+  for (let i = 0; i < bulkFiles.length; i++) {
+    if (bulkStopRequested) break;
+    setBulkRowStatus(i, "uploading", "Uploading…");
+    const result = await processBulkFile(bulkFiles[i]);
+    setBulkRowStatus(i, result.status, result.label);
+    done++;
+    if (result.status === "success") success++;
+    else if (result.status === "nomatch") nomatch++;
+    else error++;
+    bulkSummary.textContent = `${done} of ${bulkFiles.length} done — ${success} uploaded, ${nomatch} no match, ${error} failed`;
+  }
+
+  bulkRunning = false;
+  bulkCancelBtn.classList.add("hidden");
+  bulkStartBtn.disabled = false;
+  bulkSummary.textContent += bulkStopRequested ? " (stopped)" : " — finished!";
+  renderTable(); // show newly-attached photos in the main table right away
+}
+
+function cancelBulkUpload() {
+  bulkStopRequested = true;
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   loginBtn?.addEventListener("click", handleLogin);
   logoutBtn?.addEventListener("click", logoutStaff);
@@ -481,6 +646,32 @@ window.addEventListener("DOMContentLoaded", () => {
     photoDropzone.classList.remove("dragover");
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (file) handlePhotoFile(file);
+  });
+
+  bulkUploadBtn?.addEventListener("click", openBulkDrawer);
+  bulkCloseBtnTop?.addEventListener("click", closeBulkDrawer);
+  bulkCloseBtn?.addEventListener("click", closeBulkDrawer);
+  bulkOverlay?.addEventListener("click", closeBulkDrawer);
+  bulkStartBtn?.addEventListener("click", startBulkUpload);
+  bulkCancelBtn?.addEventListener("click", cancelBulkUpload);
+
+  bulkDropzone?.addEventListener("click", () => bulkFileInput.click());
+  bulkFileInput?.addEventListener("change", () => {
+    if (bulkFileInput.files && bulkFileInput.files.length) handleBulkFilesChosen(bulkFileInput.files);
+  });
+  bulkDropzone?.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    bulkDropzone.classList.add("dragover");
+  });
+  bulkDropzone?.addEventListener("dragleave", () => {
+    bulkDropzone.classList.remove("dragover");
+  });
+  bulkDropzone?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    bulkDropzone.classList.remove("dragover");
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      handleBulkFilesChosen(e.dataTransfer.files);
+    }
   });
 
   requireStaffLogin();

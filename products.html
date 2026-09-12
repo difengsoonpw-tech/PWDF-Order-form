@@ -65,6 +65,15 @@ table.product-table { width:100%; border-collapse:collapse; }
 .price-input-wrap span { padding:10px 10px; background:rgba(212,169,44,0.12); font-weight:700; font-size:13px; color:#6a5a2c; }
 .price-input-wrap input { border:none; margin-top:0; border-radius:0; }
 
+.bulk-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 10px; border-radius:8px; background:#fffaf0; border:1px solid rgba(212,169,44,0.15); }
+.bulk-row .bulk-name { flex-grow:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; }
+.bulk-row .bulk-status { flex-shrink:0; font-size:11.5px; font-weight:700; white-space:nowrap; }
+.bulk-row.status-pending .bulk-status { color:#9a8a55; }
+.bulk-row.status-uploading .bulk-status { color:#b8860b; }
+.bulk-row.status-success .bulk-status { color:#2f6b29; }
+.bulk-row.status-nomatch .bulk-status { color:#8a6d00; }
+.bulk-row.status-error .bulk-status { color:#a33; }
+
 @media (max-width: 880px) {
   header { flex-direction: column; align-items: stretch; }
   .container { padding: 12px 12px 60px; }
@@ -108,7 +117,10 @@ table.product-table { width:100%; border-collapse:collapse; }
           <option value="hidden">Hidden only</option>
         </select>
       </div>
-      <button id="addProductBtn" type="button">+ Add product</button>
+      <div style="display:flex; gap:8px;">
+        <button id="bulkUploadBtn" type="button" class="secondary">📷 Bulk upload photos</button>
+        <button id="addProductBtn" type="button">+ Add product</button>
+      </div>
     </div>
 
     <div class="product-table-wrap">
@@ -208,6 +220,34 @@ table.product-table { width:100%; border-collapse:collapse; }
   <div class="drawer-footer">
     <button id="saveProductBtn" type="button">Save product</button>
     <button id="cancelDrawerBtn" type="button" class="secondary">Cancel</button>
+  </div>
+</div>
+
+<!-- Bulk photo upload drawer (hidden until opened) -->
+<div id="bulkOverlay" class="overlay hidden"></div>
+<div id="bulkDrawer" class="drawer hidden">
+  <div class="drawer-header">
+    <div>
+      <h2>Bulk upload photos</h2>
+      <span class="code-tag">Matched by file name = product code</span>
+    </div>
+    <button id="bulkCloseBtnTop" class="icon-btn" type="button" title="Close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="field-hint" style="font-size:12.5px; line-height:1.6;">
+      Select every photo at once — for example, everything in your <strong>MASTER_LIST_PHOTO</strong> folder. Each file must be named exactly like the product's code (e.g. <strong>BREAD-BG-B0004.jpg</strong>). We'll match each photo to its product automatically and upload it — no need to open each product one by one.
+    </div>
+    <div id="bulkDropzone" class="photo-placeholder-box" style="cursor:pointer; min-height:60px;">
+      <div id="bulkDropzoneText">📁 Click to choose photos, or drop them here</div>
+    </div>
+    <input type="file" id="bulkFileInput" accept="image/jpeg,image/png,image/webp" multiple class="hidden">
+    <div id="bulkSummary" class="field-hint" style="font-size:12.5px; font-weight:700;"></div>
+    <div id="bulkProgressList" style="max-height:340px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+  </div>
+  <div class="drawer-footer">
+    <button id="bulkStartBtn" type="button" disabled>Start upload</button>
+    <button id="bulkCancelBtn" type="button" class="secondary hidden">Stop</button>
+    <button id="bulkCloseBtn" type="button" class="secondary">Close</button>
   </div>
 </div>
 
