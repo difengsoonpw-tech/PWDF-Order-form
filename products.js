@@ -36,6 +36,9 @@ const fieldPhoto = document.getElementById("fieldPhoto");
 const visibleSwitch = document.getElementById("visibleSwitch");
 const photoPreview = document.getElementById("photoPreview");
 const photoPlaceholder = document.getElementById("photoPlaceholder");
+const photoDropzone = document.getElementById("photoDropzone");
+const photoDropzoneText = document.getElementById("photoDropzoneText");
+const photoFileInput = document.getElementById("photoFileInput");
 
 let allProducts = [];   // full list from the server, staff view (has price + visible)
 let editingCode = null; // null while adding a new product
@@ -252,6 +255,7 @@ function openAddDrawer() {
   fieldPhoto.value = "";
   setVisibleSwitch(true);
   showPhotoPreview("");
+  resetPhotoDropzoneText();
   openDrawer();
 }
 
@@ -269,7 +273,103 @@ function openEditDrawer(p) {
   fieldPhoto.value = p.photo || "";
   setVisibleSwitch(p.visible !== false);
   showPhotoPreview(p.photo || "");
+  resetPhotoDropzoneText();
   openDrawer();
+}
+
+function resetPhotoDropzoneText() {
+  photoDropzoneText.innerHTML = `📷 Drop a photo here, or click to browse<br><span style="font-size:10.5px;">JPG, PNG or WEBP — resized automatically</span>`;
+  photoDropzone.classList.remove("uploading", "dragover");
+  photoFileInput.value = "";
+}
+
+const MAX_PHOTO_DIMENSION = 1000; // px, longest side after resizing
+const JPEG_QUALITY = 0.82;
+const MAX_RAW_FILE_BYTES = 20 * 1024 * 1024; // 20MB — sanity cap before we even try to read it
+
+/**
+ * Shrinks an image file down in the browser before it ever leaves the
+ * device, so uploads are fast and never hit the server's size limit.
+ * Resolves to { base64, mimeType, dataUrl }.
+ */
+function resizeImageForUpload(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type || file.type.indexOf("image/") !== 0) {
+      reject(new Error("That doesn't look like an image file."));
+      return;
+    }
+    if (file.size > MAX_RAW_FILE_BYTES) {
+      reject(new Error("That photo is too large (over 20MB). Please try a smaller one."));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that file."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not open that image."));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > MAX_PHOTO_DIMENSION || height > MAX_PHOTO_DIMENSION) {
+          if (width >= height) {
+            height = Math.round(height * (MAX_PHOTO_DIMENSION / width));
+            width = MAX_PHOTO_DIMENSION;
+          } else {
+            width = Math.round(width * (MAX_PHOTO_DIMENSION / height));
+            height = MAX_PHOTO_DIMENSION;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+        const base64 = dataUrl.split(",")[1];
+        resolve({ base64, mimeType: "image/jpeg", dataUrl });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePhotoFile(file) {
+  if (!file) return;
+
+  let resized;
+  try {
+    resized = await resizeImageForUpload(file);
+  } catch (err) {
+    alert(err.message || "Could not process that photo.");
+    return;
+  }
+
+  // Show the resized photo immediately, before the upload even finishes.
+  photoPreview.src = resized.dataUrl;
+  photoPreview.classList.remove("hidden");
+  photoPlaceholder.classList.add("hidden");
+
+  photoDropzone.classList.add("uploading");
+  photoDropzoneText.textContent = "Uploading…";
+
+  const result = await postToGoogleApi({
+    action: "uploadphoto",
+    filename: file.name || "product-photo.jpg",
+    mimeType: resized.mimeType,
+    dataBase64: resized.base64
+  });
+
+  photoDropzone.classList.remove("uploading");
+
+  if (!result || result.success !== true) {
+    photoDropzoneText.innerHTML = `📷 Drop a photo here, or click to browse<br><span style="font-size:10.5px;">JPG, PNG or WEBP — resized automatically</span>`;
+    alert("Photo upload failed: " + (result && result.message ? result.message : "unknown error") + "\n\nYou can try again, or type a photo URL directly into the Photo file box below.");
+    return;
+  }
+
+  fieldPhoto.value = result.photo;
+  photoDropzoneText.textContent = "✓ Photo uploaded — drop another to replace it";
 }
 
 function showPhotoPreview(photo) {
@@ -362,6 +462,26 @@ window.addEventListener("DOMContentLoaded", () => {
   drawerOverlay?.addEventListener("click", closeDrawer);
   saveProductBtn?.addEventListener("click", handleSaveProduct);
   visibleSwitch?.addEventListener("click", () => setVisibleSwitch(visibleSwitch.dataset.on !== "1"));
+
+  photoDropzone?.addEventListener("click", () => photoFileInput.click());
+  photoFileInput?.addEventListener("change", () => {
+    if (photoFileInput.files && photoFileInput.files[0]) {
+      handlePhotoFile(photoFileInput.files[0]);
+    }
+  });
+  photoDropzone?.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    photoDropzone.classList.add("dragover");
+  });
+  photoDropzone?.addEventListener("dragleave", () => {
+    photoDropzone.classList.remove("dragover");
+  });
+  photoDropzone?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    photoDropzone.classList.remove("dragover");
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handlePhotoFile(file);
+  });
 
   requireStaffLogin();
 });

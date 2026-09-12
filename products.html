@@ -50,7 +50,9 @@ table.product-table { width:100%; border-collapse:collapse; }
 .field-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .photo-row { display:flex; gap:14px; align-items:center; }
 .photo-preview { width:88px; height:88px; border-radius:10px; object-fit:cover; background:#f1e6c2; flex-shrink:0; }
-.photo-placeholder-box { flex-grow:1; border:1.5px dashed #d9c37f; border-radius:10px; background:#fffaf0; padding:14px; text-align:center; color:#9a8a55; font-size:12px; }
+.photo-placeholder-box { flex-grow:1; border:1.5px dashed #d9c37f; border-radius:10px; background:#fffaf0; padding:14px; text-align:center; color:#9a8a55; font-size:12px; display:flex; align-items:center; justify-content:center; min-height:88px; transition:background 0.15s, border-color 0.15s; }
+.photo-placeholder-box.dragover { background:#fff1d0; border-color:#d4a92c; }
+.photo-placeholder-box.uploading { opacity:0.6; pointer-events:none; }
 .visible-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff9e4; border:1px solid rgba(212,169,44,0.25); border-radius:10px; padding:12px 14px; }
 .switch { position:relative; width:42px; height:24px; border-radius:999px; background:#c9c2a8; flex-shrink:0; cursor:pointer; border:none; padding:0; }
 .switch.on { background:#4c9142; }
@@ -144,9 +146,10 @@ table.product-table { width:100%; border-collapse:collapse; }
     <div class="photo-row">
       <img id="photoPreview" class="photo-preview hidden" alt="">
       <div id="photoPlaceholder" class="photo-preview" style="display:flex; align-items:center; justify-content:center; color:#b7a768; font-size:11px;">No photo</div>
-      <div class="photo-placeholder-box">
-        Photo upload is coming in the next update.<br>For now, paste a file name into "Photo file" below if you already uploaded one to the MASTER_LIST_PHOTO folder.
+      <div id="photoDropzone" class="photo-placeholder-box" style="cursor:pointer;">
+        <div id="photoDropzoneText">📷 Drop a photo here, or click to browse<br><span style="font-size:10.5px;">JPG, PNG or WEBP — resized automatically</span></div>
       </div>
+      <input type="file" id="photoFileInput" accept="image/jpeg,image/png,image/webp" class="hidden">
     </div>
 
     <div>

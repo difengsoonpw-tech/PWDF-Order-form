@@ -335,6 +335,11 @@ function doPost(e) {
       return jsonResponse(saveProduct(data.product || data, true));
     }
 
+    if (action === "uploadphoto") {
+      if (!staff) return unauthorizedResponse();
+      return jsonResponse(uploadProductPhoto(data, true));
+    }
+
     const order = data.order || data;
     return jsonResponse(saveOrderObject(order, staff));
   } catch (err) {
@@ -878,6 +883,105 @@ function saveProduct(data, isStaffRequest) {
 
 function unauthorizedPlainResult() {
   return { success: false, error: "unauthorized", message: "Staff access required." };
+}
+
+/*****************************************************
+ * PRODUCT PHOTOS (Google Drive)
+ *
+ * Staff upload a photo from the portal. It's shrunk down in the browser
+ * first, sent here as base64, saved into a Drive folder called
+ * "PWDF Product Photos" (created automatically the first time), shared
+ * as "anyone with the link can view", and a hotlink URL is handed back
+ * for the product's Photo file column.
+ *
+ * This does NOT touch the PRODUCTS sheet itself — the portal still saves
+ * the product normally afterwards, same as typing a photo URL by hand.
+ *****************************************************/
+const PHOTO_FOLDER_NAME = "PWDF Product Photos";
+const MAX_PHOTO_BASE64_CHARS = 8000000; // ~6 MB decoded — generous after client-side compression
+const ALLOWED_PHOTO_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+function getOrCreatePhotoFolder() {
+  var existing = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
+  if (existing.hasNext()) return existing.next();
+  var folder = DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  try {
+    folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {
+    // Sharing can fail on some Workspace domain policies; the individual
+    // file share below still runs and is what actually matters.
+  }
+  return folder;
+}
+
+/**
+ * data.filename    - original file name, for reference only
+ * data.mimeType    - "image/jpeg" | "image/png" | "image/webp"
+ * data.dataBase64  - the file's bytes, base64-encoded, no "data:" prefix
+ */
+function uploadProductPhoto(data, isStaffRequest) {
+  if (!isStaffRequest) return unauthorizedPlainResult();
+  if (!data || !data.dataBase64) {
+    return { success: false, error: "no_file", message: "No photo data received." };
+  }
+  if (String(data.dataBase64).length > MAX_PHOTO_BASE64_CHARS) {
+    return { success: false, error: "too_large", message: "That photo is too large. Please try a smaller one." };
+  }
+
+  var mimeType = String(data.mimeType || "").toLowerCase();
+  if (!ALLOWED_PHOTO_TYPES[mimeType]) {
+    return { success: false, error: "bad_type", message: "Only JPG, PNG or WEBP photos are supported." };
+  }
+
+  var safeBase = trimToLength(String(data.filename || "product-photo"), 60)
+    .replace(/[^A-Za-z0-9._-]+/g, "_") || "product-photo";
+  var fileName = safeBase + "-" + new Date().getTime() + "." + ALLOWED_PHOTO_TYPES[mimeType];
+
+  var bytes;
+  try {
+    bytes = Utilities.base64Decode(data.dataBase64);
+  } catch (err) {
+    return { success: false, error: "bad_data", message: "Could not read that photo. Please try again." };
+  }
+
+  var blob = Utilities.newBlob(bytes, mimeType, fileName);
+
+  var folder;
+  try {
+    folder = getOrCreatePhotoFolder();
+  } catch (err) {
+    return { success: false, error: "drive_error", message: "Could not reach Google Drive for photo storage." };
+  }
+
+  var file;
+  try {
+    file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {
+    return { success: false, error: "upload_failed", message: "Photo upload failed. Please try again." };
+  }
+
+  var fileId = file.getId();
+  var url = "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000";
+
+  return { success: true, photo: url, fileId: fileId };
+}
+
+/**
+ * Run this ONCE from the editor, right after pasting this update in.
+ * Photo uploads need access to Google Drive, which this script has never
+ * asked for before — running this triggers that one-time permission popup
+ * in a safe, controlled way, instead of a customer-facing upload hitting
+ * it unexpectedly. Google will show an "unverified app" warning because
+ * this is your own private script; click "Advanced", then
+ * "Go to PWDF ORDER API (unsafe)", then "Allow" — that's expected and
+ * normal for a script you wrote yourself.
+ */
+function testDriveAccess() {
+  var folder = getOrCreatePhotoFolder();
+  Logger.log("Drive access OK.");
+  Logger.log("Photos will be stored in a Drive folder named: %s", folder.getName());
+  Logger.log("Folder link: %s", folder.getUrl());
 }
 
 /**
