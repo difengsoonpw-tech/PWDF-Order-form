@@ -45,7 +45,13 @@
 const SHEET_HEADER = "ORDER_HEADER";
 const SHEET_DETAIL = "ORDER_DETAIL";
 const SHEET_SETTING = "SETTINGS";
-const SHEET_CUSTOMERS = "CUSTOMERS";
+// Deliberately named BC_CUSTOMERS, not CUSTOMERS — many businesses already
+// keep a "CUSTOMERS" tab for something else entirely (e.g. a full WhatsApp
+// lead list, including brand-new leads who've never actually ordered). This
+// tab is intentionally separate and much narrower: only the customers who
+// exist in Business Central with a real address, matched to a delivery
+// area. This code never reads or writes any other tab, whatever it's named.
+const SHEET_CUSTOMERS = "BC_CUSTOMERS";
 
 // A small staff-maintained directory: Company Name -> Delivery Area, built
 // from your Business Central customer export. Lets a returning customer's
@@ -419,7 +425,7 @@ function getAreaById(id) {
 
 // Every area's human-readable "State - Area" label — the exact same string
 // stored on each order, shown to staff, and offered as a dropdown choice in
-// the CUSTOMERS sheet, so there's only ever one spelling to keep in sync.
+// the BC_CUSTOMERS sheet, so there's only ever one spelling to keep in sync.
 function areaLabel(area) {
   return area ? `${area.state} - ${area.area}` : "";
 }
@@ -429,7 +435,7 @@ function getAllAreaLabels() {
 }
 
 // Reverse of areaLabel() — turns a "State - Area" string (as picked from
-// the CUSTOMERS sheet's dropdown) back into an area id. Case/whitespace
+// the BC_CUSTOMERS sheet's dropdown) back into an area id. Case/whitespace
 // tolerant so a small typo or extra space doesn't silently break a match.
 function getAreaIdByLabel(label) {
   const norm = String(label || "").trim().toLowerCase();
@@ -592,12 +598,13 @@ function getCustomersSheet() {
 }
 
 /**
- * Reads the CUSTOMERS sheet (Company Name | Delivery Area) and returns the
- * usable rows as {company, areaId, areaLabel}. A row is skipped — not sent
- * to the browser with a broken area id — if the company name is blank, or
- * the Delivery Area text doesn't exactly match one of DELIVERY_AREAS' own
- * labels (e.g. a typo, or a row not filled in yet). Duplicate company names
- * are allowed in the sheet; the first match wins when looked up.
+ * Reads the BC_CUSTOMERS sheet (Company Name | Delivery Area) and returns
+ * the usable rows as {company, areaId, areaLabel}. A row is skipped — not
+ * sent to the browser with a broken area id — if the company name is
+ * blank, or the Delivery Area text doesn't exactly match one of
+ * DELIVERY_AREAS' own labels (e.g. a typo, or a row not filled in yet).
+ * Duplicate company names are allowed in the sheet; the first match wins
+ * when looked up.
  */
 function getCustomerDirectory() {
   const sheet = getCustomersSheet();
@@ -692,7 +699,7 @@ function doGet(e) {
   }
 
   // Public — the Company Name -> Delivery Area directory (staff-maintained,
-  // see the CUSTOMERS sheet), so a returning customer's area can be filled
+  // see the BC_CUSTOMERS sheet), so a returning customer's area can be filled
   // in automatically instead of asking them to pick from the area dropdown.
   // Deliberately returns nothing but company name + area — no contact info,
   // no customer code, no address. Rows whose Delivery Area doesn't match a
@@ -1329,8 +1336,11 @@ function backfillOpSentForExistingConfirmedOrders() {
 
 /*****************************************************
  * ONE-TIME SETUP — run this once, manually, from the Apps Script editor,
- * after pasting your Business Central customer export into the CUSTOMERS
- * sheet's "Company Name" column.
+ * after pasting your Business Central customer export into the
+ * BC_CUSTOMERS sheet's "Company Name" column. This sheet is separate from
+ * any general leads/WhatsApp-contacts sheet you may already keep — running
+ * this creates BC_CUSTOMERS fresh if it doesn't exist yet, and never
+ * touches any other tab.
  *
  * Locks the "Delivery Area" column (column B) to a dropdown of every valid
  * area label, so filling in each customer's area is a click, not free
@@ -1347,7 +1357,7 @@ function setupCustomersAreaDropdown() {
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, 2, lastRow - 1, 1).setDataValidation(rule);
-  Logger.log("Delivery Area dropdown set on CUSTOMERS!B2:B%s with %s area choices.", lastRow, labels.length);
+  Logger.log("Delivery Area dropdown set on %s!B2:B%s with %s area choices.", SHEET_CUSTOMERS, lastRow, labels.length);
 }
 
 /*****************************************************
