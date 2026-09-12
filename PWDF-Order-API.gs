@@ -264,6 +264,11 @@ function doGet(e) {
     return jsonResponse({ success: callerIsStaff(e, null) });
   }
 
+  // Catalogue for the website. Public callers get no prices and no hidden rows.
+  if (action === "getproducts") {
+    return jsonResponse({ success: true, products: getProducts(callerIsStaff(e, null)) });
+  }
+
   // ---- Everything below requires the staff token ----
   if (!callerIsStaff(e, null)) {
     return unauthorizedResponse();
@@ -281,6 +286,9 @@ function doGet(e) {
 
     case "getdraftorders":
       return jsonResponse(fetchDraftOrders());
+
+    case "getprices":
+      return jsonResponse({ success: true, prices: getWholesalePrices() });
 
     default:
       return jsonResponse({ success: false, message: "Unknown Action" });
@@ -320,6 +328,11 @@ function doPost(e) {
     if (action === "updateorder") {
       if (!staff) return unauthorizedResponse();
       return updateOrder(data.orderRef || "", data.updates || {});
+    }
+
+    if (action === "saveproduct") {
+      if (!staff) return unauthorizedResponse();
+      return jsonResponse(saveProduct(data.product || data, true));
     }
 
     const order = data.order || data;
@@ -627,6 +640,276 @@ function generateOrderRef(settingSheet) {
 
   settingSheet.getRange("B2").setValue(nextNo + 1);
   return orderRef;
+}
+
+/*****************************************************
+ * PRODUCT CATALOGUE  (read from the PRODUCTS tab)
+ *
+ * The website used to carry all 341 products inside Product.js, which meant
+ * adding an item required a code change. They now live in the PRODUCTS tab
+ * of this spreadsheet, so they can be edited like any spreadsheet.
+ *
+ * Expected columns (order does not matter, the header names do):
+ *   Code | Name | Category | Options | Addon | WholesalePrice | PhotoFile | Visible
+ *
+ * Customers receive products WITHOUT prices, and never see hidden rows.
+ * Staff (holding the token) receive prices and hidden rows too.
+ *****************************************************/
+const SHEET_PRODUCTS = "PRODUCTS";
+
+function readProductSheet() {
+  var sheet;
+  try {
+    sheet = getSpreadsheet().getSheetByName(SHEET_PRODUCTS);
+  } catch (err) {
+    return [];
+  }
+  if (!sheet) return [];
+
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+
+  // Match columns by header name so the sheet can be reordered safely.
+  var head = values[0].map(function (h) {
+    return String(h || "").trim().toLowerCase().replace(/\s+/g, "");
+  });
+  function col(name) { return head.indexOf(name); }
+
+  var iCode  = col("code");
+  var iName  = col("name");
+  var iCat   = col("category");
+  var iOpt   = col("options");
+  var iAddon = col("addon");
+  var iPrice = col("wholesaleprice");
+  var iPhoto = col("photofile");
+  var iVis   = col("visible");
+
+  if (iCode < 0) return [];
+
+  var out = [];
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var code = String(row[iCode] || "").trim();
+    if (!code) continue;
+
+    // Google Sheets often auto-converts a "TRUE"/"FALSE" text column into a real
+    // boolean on import. row[iVis] can then be the boolean `false`, and
+    // `false || "TRUE"` would wrongly fall back to "TRUE" (false is falsy in JS).
+    // So check for "cell is empty" explicitly instead of using ||.
+    var visCell = iVis >= 0 ? row[iVis] : "TRUE";
+    var visRaw = (visCell === "" || visCell === null || visCell === undefined)
+      ? "TRUE"
+      : String(visCell).trim().toUpperCase();
+    var hidden = (visRaw === "FALSE" || visRaw === "NO" || visRaw === "0");
+
+    out.push({
+      code: code,
+      name: iName  >= 0 ? String(row[iName]  || "").trim() : "",
+      category: iCat >= 0 ? String(row[iCat] || "").trim() : "",
+      choice: iOpt >= 0 ? String(row[iOpt]   || "").trim() : "",
+      addon: iAddon >= 0 ? String(row[iAddon] || "").trim() : "",
+      price: iPrice >= 0 ? (Number(row[iPrice]) || 0) : 0,
+      photo: iPhoto >= 0 ? String(row[iPhoto] || "").trim() : "",
+      visible: !hidden
+    });
+  }
+  return out;
+}
+
+/**
+ * Products for the website.
+ * Public callers get no prices and no hidden rows.
+ */
+function getProducts(isStaffRequest) {
+  var rows = readProductSheet();
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var p = rows[i];
+    if (!isStaffRequest && !p.visible) continue;
+    var item = {
+      code: p.code,
+      name: p.name,
+      category: p.category,
+      choice: p.choice,
+      addon: p.addon,
+      photo: p.photo
+    };
+    if (isStaffRequest) {
+      item.price = p.price;
+      item.visible = p.visible;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/** Wholesale prices keyed by code, for staff pricing. */
+function getWholesalePrices() {
+  var rows = readProductSheet();
+  var map = {};
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].price) map[rows[i].code] = rows[i].price;
+  }
+  return map;
+}
+
+/**
+ * Makes up a fresh, guaranteed-unique product code for a brand new product,
+ * so staff never have to invent one themselves. Existing codes are never
+ * touched or reused — this only looks at what's already there to avoid a clash.
+ */
+function generateProductCode(values, iCode, category) {
+  var slug = String(category || "ITEM").toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 4) || "ITEM";
+  var prefix = "NEW-" + slug + "-";
+  var taken = {};
+  for (var r = 1; r < values.length; r++) {
+    var c = String(values[r][iCode] || "").trim().toUpperCase();
+    if (c.indexOf(prefix) === 0) {
+      var n = parseInt(c.slice(prefix.length), 10);
+      if (!isNaN(n)) taken[n] = true;
+    }
+  }
+  var n = 1;
+  while (taken[n]) n++;
+  var padded = String(n);
+  while (padded.length < 4) padded = "0" + padded;
+  return prefix + padded;
+}
+
+/**
+ * Add a brand-new product, or edit an existing one, in the PRODUCTS sheet.
+ * Staff only. Pass just { code, visible } to quickly hide/show a product
+ * without touching its other fields — any field left out of `data` is left
+ * exactly as it was.
+ *
+ * data.code missing/blank -> a new product is created and a fresh code
+ *                             is generated from data.category.
+ * data.code matches a row -> that row is updated in place.
+ */
+function saveProduct(data, isStaffRequest) {
+  if (!isStaffRequest) return unauthorizedPlainResult();
+  if (!data || typeof data !== "object") {
+    return { success: false, error: "bad_request", message: "No product data received." };
+  }
+
+  var sheet;
+  try {
+    sheet = getSpreadsheet().getSheetByName(SHEET_PRODUCTS);
+  } catch (err) {
+    return { success: false, error: "no_sheet", message: "Could not open the spreadsheet." };
+  }
+  if (!sheet) {
+    return { success: false, error: "no_sheet", message: 'No tab named "PRODUCTS" was found.' };
+  }
+
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 1) {
+    return { success: false, error: "empty_sheet", message: "The PRODUCTS tab has no header row." };
+  }
+
+  var head = values[0].map(function (h) {
+    return String(h || "").trim().toLowerCase().replace(/\s+/g, "");
+  });
+  function col(name) { return head.indexOf(name); }
+  var iCode  = col("code");
+  var iName  = col("name");
+  var iCat   = col("category");
+  var iOpt   = col("options");
+  var iAddon = col("addon");
+  var iPrice = col("wholesaleprice");
+  var iPhoto = col("photofile");
+  var iVis   = col("visible");
+
+  if (iCode < 0) {
+    return { success: false, error: "no_code_column", message: 'The PRODUCTS tab needs a "Code" column.' };
+  }
+
+  var code = trimToLength(String(data.code || "").trim(), 60);
+  var isNew = !code;
+
+  if (isNew) {
+    var name = trimToLength(String(data.name || "").trim(), PUBLIC_MAX_TEXT_LENGTH);
+    if (!name) {
+      return { success: false, error: "missing_name", message: "Enter a product name before saving." };
+    }
+    code = generateProductCode(values, iCode, data.category);
+  }
+
+  // Find an existing row with this exact code (case-insensitive).
+  var rowNum = -1; // 1-based sheet row number
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][iCode] || "").trim().toUpperCase() === code.toUpperCase()) {
+      rowNum = r + 1;
+      break;
+    }
+  }
+
+  var priceValue = (data.price === undefined || data.price === null || data.price === "")
+    ? undefined
+    : (Number(data.price) || 0);
+  var visibleValue = (data.visible === undefined) ? undefined : (data.visible !== false);
+
+  if (rowNum === -1) {
+    // Brand new row.
+    var newRow = [];
+    for (var c2 = 0; c2 < head.length; c2++) newRow.push("");
+    newRow[iCode] = code;
+    if (iName  >= 0) newRow[iName]  = trimToLength(String(data.name || ""), PUBLIC_MAX_TEXT_LENGTH);
+    if (iCat   >= 0) newRow[iCat]   = trimToLength(String(data.category || ""), 100);
+    if (iOpt   >= 0) newRow[iOpt]   = trimToLength(String(data.choice || ""), PUBLIC_MAX_TEXT_LENGTH);
+    if (iAddon >= 0) newRow[iAddon] = trimToLength(String(data.addon || ""), PUBLIC_MAX_TEXT_LENGTH);
+    if (iPrice >= 0) newRow[iPrice] = priceValue === undefined ? 0 : priceValue;
+    if (iPhoto >= 0) newRow[iPhoto] = trimToLength(String(data.photo || ""), 300);
+    if (iVis   >= 0) newRow[iVis]   = visibleValue === undefined ? true : visibleValue;
+    sheet.appendRow(newRow);
+  } else {
+    // Update only the fields that were actually sent.
+    if (data.name     !== undefined && iName  >= 0) sheet.getRange(rowNum, iName  + 1).setValue(trimToLength(String(data.name), PUBLIC_MAX_TEXT_LENGTH));
+    if (data.category !== undefined && iCat   >= 0) sheet.getRange(rowNum, iCat   + 1).setValue(trimToLength(String(data.category), 100));
+    if (data.choice   !== undefined && iOpt   >= 0) sheet.getRange(rowNum, iOpt   + 1).setValue(trimToLength(String(data.choice), PUBLIC_MAX_TEXT_LENGTH));
+    if (data.addon    !== undefined && iAddon >= 0) sheet.getRange(rowNum, iAddon + 1).setValue(trimToLength(String(data.addon), PUBLIC_MAX_TEXT_LENGTH));
+    if (priceValue    !== undefined && iPrice >= 0) sheet.getRange(rowNum, iPrice + 1).setValue(priceValue);
+    if (data.photo    !== undefined && iPhoto >= 0) sheet.getRange(rowNum, iPhoto + 1).setValue(trimToLength(String(data.photo), 300));
+    if (visibleValue  !== undefined && iVis   >= 0) sheet.getRange(rowNum, iVis   + 1).setValue(visibleValue);
+  }
+
+  return { success: true, code: code };
+}
+
+function unauthorizedPlainResult() {
+  return { success: false, error: "unauthorized", message: "Staff access required." };
+}
+
+/**
+ * Run this ONCE from the editor after importing the PRODUCTS tab,
+ * to confirm the sheet is readable and looks right.
+ */
+function checkProductSheet() {
+  var rows = readProductSheet();
+
+  if (!rows.length) {
+    Logger.log("No products found.");
+    Logger.log("Check that a tab named exactly PRODUCTS exists and has a header row");
+    Logger.log("with a column called Code.");
+    return;
+  }
+
+  var priced = 0, hidden = 0, cats = {};
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].price > 0) priced++;
+    if (!rows[i].visible) hidden++;
+    cats[rows[i].category] = true;
+  }
+
+  Logger.log("Products read      : %s", rows.length);
+  Logger.log("With a price       : %s", priced);
+  Logger.log("Hidden from customers: %s", hidden);
+  Logger.log("Categories         : %s", Object.keys(cats).length);
+  Logger.log("First product      : %s (%s) RM %s", rows[0].code, rows[0].name, rows[0].price);
+
+  if (priced < rows.length) {
+    Logger.log("NOTE: %s product(s) have no price and will total as 0.", rows.length - priced);
+  }
 }
 
 /*****************************************************
