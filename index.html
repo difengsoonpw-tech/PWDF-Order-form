@@ -486,33 +486,12 @@ header {
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:10px;">
-    <span id="modeLabel" class="mode-label"></span>
-    <button type="button" class="mode-switch" onclick="setPortalMode('')">Change</button>
     <button type="button" onclick="window.location.href='staff.html'">Staff Mode</button>
     <span>
       Items: <span id="cartCount">0</span>
     </span>
   </div>
 </header>
-
-<!-- Shown on a first visit, and whenever the customer taps "Change" -->
-<div id="modeChooser">
-  <div class="mode-box">
-    <img src="logo.png" alt="Pastry World" class="mode-logo">
-    <h2>Welcome</h2>
-    <p>How are you ordering today?</p>
-
-    <button type="button" class="mode-btn" onclick="setPortalMode('business')">
-      <strong>I'm a business</strong>
-      <span>Cafés, hotels and bakeries. Wholesale quantities, with your sales advisor confirming pricing.</span>
-    </button>
-
-    <button type="button" class="mode-btn" onclick="setPortalMode('retail')">
-      <strong>I'm a customer</strong>
-      <span>Buying for myself or a celebration. Prices shown as you browse.</span>
-    </button>
-  </div>
-</div>
 
 <div id="menuContainer" class="container">
   <div id="orderGuide" class="order-guide">
@@ -522,7 +501,7 @@ header {
       <li>Select option & quantity, then tap <strong>Add</strong></li>
       <li>Review cart and submit via WhatsApp or Email</li>
     </ol>
-    <div class="guide-note" id="guideNote">
+    <div class="guide-note">
       Prices will be confirmed by your sales advisor
     </div>
   </div>
@@ -547,7 +526,7 @@ header {
 <div id="summaryPopup">
   <div class="summary-box">
     <div style="text-align: center; margin-bottom: 16px;">
-      <img src="logo.png" alt="Pastry World" style="max-width: 150px; height: auto;">
+      <img src="images/logo.png" alt="Pastry World" style="max-width: 150px; height: auto;">
     </div>
     <div class="policy-box">
       <strong>⚠ IMPORTANT:</strong>
@@ -582,7 +561,6 @@ header {
 
 <script src="Product.js"></script>
 <script src="imageMap.js"></script>
-<script src="retail-prices.js"></script>
 <script src="google.js"></script>
 <script src="order.js"></script>
 <script src="script.js.js"></script>
@@ -599,53 +577,6 @@ header {
 </a>
 
 <style>
-  /* ===== PRICE ON PRODUCT CARD (retail / staff only) ===== */
-  .item-price { font-size: 14px; font-weight: 700; color: #6b4d00; margin-top: 2px; }
-  @media (max-width: 600px) { .item-price { font-size: 12px; } }
-
-  /* ===== MODE LABEL IN HEADER ===== */
-  .mode-label { font-size: 13px; font-weight: 600; color: #6b4d00; white-space: nowrap; }
-  .mode-switch { background: transparent !important; color: #6b4d00 !important; border: 1px solid rgba(212,169,44,0.55) !important; font-size: 12px !important; padding: 6px 10px !important; min-width: 0 !important; }
-
-  /* ===== FIRST-VISIT MODE CHOOSER ===== */
-  #modeChooser {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(24,20,12,0.82);
-    z-index: 2000;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  #modeChooser .mode-box {
-    background: #fffaf0;
-    border-radius: 20px;
-    padding: 28px 24px;
-    max-width: 460px;
-    width: 100%;
-    text-align: center;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.35);
-  }
-  #modeChooser .mode-logo { max-width: 150px; height: auto; margin-bottom: 8px; }
-  #modeChooser h2 { margin: 6px 0 4px; font-size: 22px; color: #222; }
-  #modeChooser p { margin: 0 0 20px; color: #6a5a3a; font-size: 14px; }
-  .mode-btn {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: #ffffff;
-    border: 2px solid rgba(212,169,44,0.45);
-    border-radius: 14px;
-    padding: 14px 16px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: border-color .15s, background .15s;
-  }
-  .mode-btn:hover { border-color: #d4a92c; background: #fffdf6; }
-  .mode-btn strong { display: block; font-size: 16px; color: #222; margin-bottom: 3px; }
-  .mode-btn span { display: block; font-size: 13px; color: #6a5a3a; line-height: 1.35; }
-
   .floating-wa { position: fixed; bottom: 16px; right: 16px; width: 56px; height: 56px; border-radius: 50%; background: #25D366; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(0,0,0,0.18); z-index: 1400; text-decoration: none; }
   .floating-wa svg { display:block; }
   @media (max-width:420px) { .floating-wa { bottom: 12px; right: 12px; width: 50px; height:50px; } }
