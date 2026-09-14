@@ -333,6 +333,14 @@ function renderOrderTable(orders, container, isDraftList) {
     actions.appendChild(editBtn);
 
     if (status === "Draft") {
+      // The main action on a new order: customers no longer choose a
+      // delivery date, so setting it here is what confirms the order and
+      // sends it to Operations, all in one go.
+      const dateBtn = document.createElement("button");
+      dateBtn.textContent = order.deliveryDate ? "Change date" : "Set delivery date";
+      dateBtn.onclick = () => setDeliveryDateFlow(orderRef, order.company || order.Company || "");
+      actions.appendChild(dateBtn);
+
       const confirmBtn = document.createElement("button");
       confirmBtn.textContent = "Confirm";
       confirmBtn.onclick = () => confirmOrder(orderRef);
@@ -376,6 +384,50 @@ function getStatusClass(status) {
 function openOrder(orderRef) {
   if (!orderRef) return;
   window.location.href = `edit.html?orderRef=${encodeURIComponent(orderRef)}`;
+}
+
+/* Ask for the delivery date, showing what we know about where this
+   customer is — their usual area and the next dates it's actually served
+   on — so the date can be picked without hunting through a calendar. */
+async function setDeliveryDateFlow(orderRef, company) {
+  let prompt_lines = ["Delivery date for " + orderRef + " (YYYY-MM-DD):", ""];
+  let suggested = "";
+
+  const hint = await fetchDeliveryHint(company);
+  if (hint && hint.success && hint.match) {
+    prompt_lines.push("Usual area: " + hint.match.areaLabel);
+    if (hint.deliveryWeekdays && hint.deliveryWeekdays.length) {
+      prompt_lines.push("Delivers on: " + hint.deliveryWeekdays.join(", "));
+    }
+    if (hint.suggestedDates && hint.suggestedDates.length) {
+      prompt_lines.push("Next available: " + hint.suggestedDates.join(", "));
+      suggested = hint.suggestedDates[0];
+    }
+  } else if (hint && hint.note) {
+    prompt_lines.push(hint.note);
+  }
+  prompt_lines.push("");
+  prompt_lines.push("Setting the date will CONFIRM this order and email Operations.");
+
+  const chosen = window.prompt(prompt_lines.join("\n"), suggested);
+  if (chosen === null) return; // cancelled
+
+  const result = await setDeliveryDate(orderRef, chosen.trim());
+  if (!result || result.success !== true) {
+    alert((result && (result.error || result.message)) || "Could not set the delivery date.");
+    return;
+  }
+
+  let message = "Delivery date set to " + chosen.trim() + ". Order confirmed.";
+  if (result.deliveryArea) message += "\nDelivery area filled in: " + result.deliveryArea;
+  message += (result.opNotify && result.opNotify.sent)
+    ? "\nOperations has been emailed."
+    : "\nNOTE: the Operations email did NOT go out — this order is on the Awaiting Operations list so you can send it manually.";
+  if (result.warning) message += "\n\n\u26a0 " + result.warning;
+  alert(message);
+
+  await loadOpNeeded();
+  await loadDraftOrders();
 }
 
 async function confirmOrder(orderRef) {

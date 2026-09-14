@@ -61,6 +61,25 @@ async function updateOrderPayload(orderRef, updates) {
   });
 }
 
+/* Setting the delivery date is the single action that also confirms the
+   order and emails Operations — see setdeliverydate in the backend. */
+async function setDeliveryDate(orderRef, deliveryDate) {
+  return await postToGoogleApi({
+    action: "setdeliverydate",
+    orderRef,
+    deliveryDate
+  });
+}
+
+/* Which area this customer is usually delivered to, and the next few dates
+   that area is actually served on. Staff-only. */
+async function fetchDeliveryHint(company) {
+  return await getFromGoogleApi({
+    action: "getdeliveryhint",
+    company: company || ""
+  });
+}
+
 async function fetchOrder(orderRef) {
   const result = await getFromGoogleApi({
     action: "getorder",

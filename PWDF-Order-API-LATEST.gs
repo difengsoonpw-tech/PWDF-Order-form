@@ -59,7 +59,13 @@ const SHEET_CUSTOMERS = "BC_CUSTOMERS";
 // from the (staff-oriented) area dropdown themselves. New leads not yet in
 // here just fall back to the normal manual area picker (Other/Not-listed
 // included) — nothing breaks for them, this is purely a shortcut.
-const CUSTOMERS_COLUMNS = ["Company Name", "Delivery Area"];
+// Column C is optional and was added later, so an existing two-column
+// BC_CUSTOMERS sheet keeps working untouched. It holds the customer's OTHER
+// name — whichever of the pair column A doesn't have. A shop trading as
+// "KORE" may be registered as "IO GROUP SDN BHD"; put one in A and the other
+// in C and either one typed into the order form finds the same delivery
+// area. The code never assumes which is which.
+const CUSTOMERS_COLUMNS = ["Company Name", "Delivery Area", "Also Known As"];
 
 const HEADER_COLUMNS = [
   "OrderRef",
@@ -117,6 +123,15 @@ function checkSetup() {
   Logger.log("STAFF_TOKEN set    : %s", token ? "YES" : "NO  <-- add this");
   Logger.log("SALES_EMAIL set    : %s", salesEmail ? "YES (" + salesEmail + ")" : "NO — you will NOT be emailed when a customer places a new order");
   Logger.log("OP_EMAIL set       : %s", opEmail ? "YES (" + opEmail + ")" : "NO — Operations will NOT be emailed automatically when you confirm an order");
+
+  const sendAsWanted = String(scriptProps().getProperty("SEND_AS") || "").trim();
+  if (!sendAsWanted) {
+    Logger.log("SEND_AS set        : NO — alerts will be sent from this Google account's own address");
+  } else if (configuredSendAsAlias()) {
+    Logger.log("SEND_AS set        : YES (%s) and verified — alerts will come FROM this address", sendAsWanted);
+  } else {
+    Logger.log("SEND_AS set        : %s, but NOT verified in Gmail yet — see the note logged just above", sendAsWanted);
+  }
 
   if (token && token.length < 12) {
     Logger.log("WARNING: STAFF_TOKEN is short. Use at least 12 characters.");
@@ -200,35 +215,20 @@ function sanitizePublicOrder(data) {
     throw new Error("Order has too many line items.");
   }
 
-  const areaId = trimToLength(data.deliveryArea, 80);
-  const area = getAreaById(areaId);
-  if (!area) {
-    throw new Error("Please select your delivery area from the list.");
-  }
-
-  const deliveryDate = trimToLength(data.deliveryDate, 40);
-  if (!isValidPublicDeliveryDate(deliveryDate)) {
-    throw new Error(
-      "Please choose a valid delivery date — at least " + DELIVERY_LEAD_WORKING_DAYS +
-      " working days from today, and not a Sunday (we're closed)."
-    );
-  }
-  if (!isValidPublicDeliveryChoice(deliveryDate, areaId)) {
-    const allowedNames = areaDeliveryWeekdays(area).map(isoWeekdayName).join(", ");
-    throw new Error(
-      "That delivery date doesn't match your area's delivery day(s). " +
-      areaLabel(area) + " delivers on: " + (allowedNames || "no available day") + "."
-    );
-  }
-
+  // Customers are deliberately NOT asked for a delivery area or a delivery
+  // date any more. They can't reliably know which delivery day their address
+  // falls on, and a wrong guess turned into a missed delivery. Sales sets the
+  // real date in the dashboard afterwards, using the area hint from
+  // BC_CUSTOMERS. Anything a caller sends in those fields is ignored rather
+  // than trusted.
   return {
     // orderRef deliberately omitted: the server always generates a new one,
     // so a public caller can never overwrite an existing order.
     customer: trimToLength(data.customer, PUBLIC_MAX_TEXT_LENGTH),
     company: trimToLength(data.company || data.brandName, PUBLIC_MAX_TEXT_LENGTH),
     contact: trimToLength(data.contact, PUBLIC_MAX_TEXT_LENGTH),
-    deliveryDate: deliveryDate,
-    deliveryArea: areaLabel(area),
+    deliveryDate: "",
+    deliveryArea: "",
     status: "Draft", // public submissions are always drafts
     items: items.map(item => ({
       code: trimToLength(item.code, 60),
@@ -613,31 +613,225 @@ function getCustomerDirectory() {
   rows.forEach(row => {
     const company = String(row[0] || "").trim();
     const label = String(row[1] || "").trim();
+    const brand = String(row[2] || "").trim(); // optional, may not exist at all
     if (!company || !label) return;
     const areaId = getAreaIdByLabel(label);
     if (!areaId) return; // unrecognised label — skip rather than guess
-    out.push({ company: company, areaId: areaId, areaLabel: label });
+    out.push({ company: company, brand: brand, areaId: areaId, areaLabel: label });
   });
   return out;
 }
 
 /**
- * Looks up ONE company by exact name (case/whitespace tolerant) and
- * returns just that customer's area, or null if there's no match.
- *
- * Deliberately does NOT expose the full customer directory over the
- * network — a customer typing their own company name only ever gets
- * their own match back, never the list of every other customer, brand
- * name, or delivery area on file. This is the only public-facing way to
- * reach the BC_CUSTOMERS sheet's data; there is no action that returns
- * the whole list to an unauthenticated caller.
+ * Flattens a company name down to just its comparable letters and digits,
+ * so harmless differences stop causing misses: capitals, punctuation
+ * ("P.W.D.F." vs "PWDF"), double spaces, and the legal tail a customer
+ * almost never types ("IO GROUP SDN BHD" when they'll write "IO GROUP").
  */
+const COMPANY_NAME_SUFFIXES = [
+  "sendirian berhad", "sdn bhd", "sdn", "bhd", "plt", "llp",
+  "enterprises", "enterprise", "trading", "resources", "holdings"
+];
+
+function normalizeCompanyName(value) {
+  // "&" becomes the word "and" first, so "ANNE BAKE & BREW" and
+  // "Anne Bake and Brew" end up identical instead of merely similar.
+  let s = String(value || "").toLowerCase().replace(/&/g, " and ");
+  s = s.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (let i = 0; i < COMPANY_NAME_SUFFIXES.length; i++) {
+      const tail = " " + COMPANY_NAME_SUFFIXES[i];
+      // Never strip a name down to nothing — a customer literally called
+      // "Enterprise" keeps its name.
+      if (s.length > tail.length && s.slice(-tail.length) === tail) {
+        s = s.slice(0, s.length - tail.length).trim();
+        stripped = true;
+      }
+    }
+  }
+  return s;
+}
+
+/**
+ * Every spelling of one name worth searching by:
+ *   "C & P Coffee"  ->  "c and p coffee", "c p coffee", "candpcoffee", "cpcoffee"
+ * The joined-up forms are what let "PWDF Bakery" find "P.W.D.F. Bakery Sdn.
+ * Bhd.", and dropping "and" covers the customer who writes "CP Coffee".
+ */
+function customerNameVariants(name) {
+  const base = normalizeCompanyName(name);
+  if (!base) return [];
+  const withoutAnd = base.replace(/\band\b/g, " ").replace(/\s+/g, " ").trim();
+  const variants = [];
+  [base, withoutAnd].forEach(form => {
+    if (!form) return;
+    [form, form.replace(/ /g, "")].forEach(key => {
+      if (key && variants.indexOf(key) === -1) variants.push(key);
+    });
+  });
+  return variants;
+}
+
+/** Both of a customer's names — company and "also known as" — in every spelling. */
+function customerSearchKeys(entry) {
+  const keys = [];
+  [entry.company, entry.brand].forEach(name => {
+    customerNameVariants(name).forEach(key => {
+      if (keys.indexOf(key) === -1) keys.push(key);
+    });
+  });
+  return keys;
+}
+
+/**
+ * Given the customers a search turned up, decide whether it's safe to fill
+ * the delivery area in automatically.
+ *
+ * Several customers matching is fine as long as they all deliver to the SAME
+ * area — the answer is the same either way. If they'd go to different areas
+ * the search was too vague to guess from, so we return nothing and the
+ * customer picks their area from the dropdown as normal. Better a dropdown
+ * than a confidently wrong delivery day.
+ */
+/**
+ * How many single-character slips separate two names ("anne baked brew" vs
+ * "anne bake brew" = 1). Deliberately named customerName* so it can never
+ * collide with the similarity helpers in CustomerDB.gs — every .gs file in
+ * an Apps Script project shares one namespace, and a duplicated function
+ * name silently overrides the other one.
+ *
+ * Gives up as soon as the difference exceeds what we'd accept, so a long
+ * customer list stays cheap to search.
+ */
+function customerNameEditDistance(a, b, giveUpAfter) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > giveUpAfter) return giveUpAfter + 1;
+
+  let previous = [];
+  for (let j = 0; j <= b.length; j++) previous[j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    let bestInRow = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      if (current[j] < bestInRow) bestInRow = current[j];
+    }
+    if (bestInRow > giveUpAfter) return giveUpAfter + 1; // can only get worse
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * How much misspelling to forgive, by how much was typed. Short names get no
+ * leeway at all — one slip in "KORE" could just as easily be "CORE", a
+ * different customer entirely — while a long name has room for a typo.
+ */
+function customerTypoAllowance(length) {
+  if (length < 6) return 0;
+  if (length < 10) return 1;
+  return 2;
+}
+
+function resolveSingleArea(entries) {
+  if (!entries.length) return null;
+  const first = entries[0];
+  const allAgree = entries.every(e => e.areaId === first.areaId);
+  if (!allAgree) return null;
+  return { areaId: first.areaId, areaLabel: first.areaLabel };
+}
+
+/**
+ * Looks up ONE customer by what they typed into the Brand Name box and
+ * returns just that customer's delivery area, or null if we can't tell.
+ *
+ * Searches the company name AND the brand name (BC_CUSTOMERS column C), so
+ * "IO GROUP" and "KORE" both find the same customer. Matching is forgiving:
+ * capitals, punctuation and a trailing "SDN BHD" are ignored, and a partial
+ * name works too — typing "IO" finds "IO GROUP" as long as no other customer
+ * starting with "IO" delivers somewhere else.
+ *
+ * Deliberately does NOT expose the customer directory over the network. The
+ * reply is only ever a delivery area — never a company name, a brand name,
+ * or how many customers matched — and there is no action anywhere that hands
+ * the whole BC_CUSTOMERS list to an unauthenticated caller.
+ */
+const CUSTOMER_MATCH_MIN_CHARS = 2;
+
 function findCustomerMatch(companyTyped) {
-  const norm = String(companyTyped || "").trim().toLowerCase();
-  if (!norm) return null;
-  const found = getCustomerDirectory().find(c => c.company.trim().toLowerCase() === norm);
-  if (!found) return null;
-  return { areaId: found.areaId, areaLabel: found.areaLabel };
+  const typed = normalizeCompanyName(companyTyped);
+  // One letter matches half the customer base — not worth guessing from.
+  if (!typed || typed.length < CUSTOMER_MATCH_MIN_CHARS) return null;
+
+  const typedVariants = customerNameVariants(companyTyped);
+  const directory = getCustomerDirectory();
+
+  // 1. Whole-name match on either of the customer's names.
+  const exact = directory.filter(entry => {
+    const keys = customerSearchKeys(entry);
+    return typedVariants.some(variant => keys.indexOf(variant) !== -1);
+  });
+  const exactArea = resolveSingleArea(exact);
+  if (exactArea) return exactArea;
+
+  // 2. Partial: what they typed starts the name, or starts any word inside
+  //    it — so "IO" finds "IO GROUP", and "bake" finds "ANNE BAKE & BREW".
+  const partial = directory.filter(entry => customerSearchKeys(entry).some(key =>
+    typedVariants.some(variant =>
+      key.indexOf(variant) === 0 || key.split(" ").some(word => word.indexOf(variant) === 0)
+    )
+  ));
+  const partialArea = resolveSingleArea(partial);
+  if (partialArea) return partialArea;
+
+  // 3. Last resort — forgive a typo. "ANNE BAKED & BREW" should still find
+  //    "ANNE BAKE & BREW" rather than sending that customer to the dropdown.
+  const allowance = customerTypoAllowance(typed.length);
+  if (!allowance) return null;
+  const close = directory.filter(entry => customerSearchKeys(entry).some(key =>
+    typedVariants.some(variant => customerNameEditDistance(variant, key, allowance) <= allowance)
+  ));
+  return resolveSingleArea(close);
+}
+
+/**
+ * Everything the dashboard needs to pick a delivery date for one customer:
+ * their matched area, the weekdays that area is served on, and the next few
+ * actual dates that qualify — so setting a date is a click, not a puzzle
+ * involving a wall calendar.
+ *
+ * Staff-only. A customer never sees any of this; they just place the order.
+ */
+function getDeliveryHint(companyTyped) {
+  const match = findCustomerMatch(companyTyped);
+  if (!match) {
+    return { success: true, match: null, suggestedDates: [], note: "This company isn't in BC_CUSTOMERS, so there's no delivery-day guidance for it yet." };
+  }
+
+  const area = getAreaById(match.areaId);
+  const weekdays = area ? areaDeliveryWeekdays(area) : [];
+  const suggested = [];
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  // Look ahead a fortnight — far enough to cover any weekly delivery day.
+  for (let i = 1; i <= 21 && suggested.length < 5; i++) {
+    cursor.setDate(cursor.getDate() + (i === 1 ? 1 : 1));
+    const iso = Number(Utilities.formatDate(cursor, Session.getScriptTimeZone(), "u"));
+    if (weekdays.indexOf(iso) !== -1) {
+      suggested.push(Utilities.formatDate(cursor, Session.getScriptTimeZone(), "yyyy-MM-dd"));
+    }
+  }
+
+  return {
+    success: true,
+    match: { areaId: match.areaId, areaLabel: match.areaLabel },
+    deliveryWeekdays: weekdays.map(isoWeekdayName),
+    suggestedDates: suggested
+  };
 }
 
 /*****************************************************
@@ -725,10 +919,6 @@ function doGet(e) {
   // list. There is no action anywhere that hands the whole BC_CUSTOMERS
   // directory to an unauthenticated caller; every other customer's name
   // and delivery area stays private.
-  if (action === "matchcustomer") {
-    return jsonResponse({ success: true, match: findCustomerMatch(params.company || "") });
-  }
-
   // ---- Everything below requires the staff token ----
   if (!callerIsStaff(e, null)) {
     return unauthorizedResponse();
@@ -752,6 +942,16 @@ function doGet(e) {
 
     case "getprices":
       return jsonResponse({ success: true, prices: getWholesalePrices() });
+
+    // Staff only, and deliberately so. Customers no longer see anything
+    // about delivery areas, so nothing about the customer list is exposed
+    // publicly any more — this is now purely a hint for whoever is setting
+    // the delivery date in the dashboard.
+    case "matchcustomer":
+      return jsonResponse({ success: true, match: findCustomerMatch(params.company || "") });
+
+    case "getdeliveryhint":
+      return jsonResponse(getDeliveryHint(params.company || ""));
 
     default:
       return jsonResponse({ success: false, message: "Unknown Action" });
@@ -791,6 +991,11 @@ function doPost(e) {
     if (action === "updateorder") {
       if (!staff) return unauthorizedResponse();
       return updateOrder(data.orderRef || "", data.updates || {});
+    }
+
+    if (action === "setdeliverydate") {
+      if (!staff) return unauthorizedResponse();
+      return setDeliveryDateAndConfirm(data.orderRef || "", data.deliveryDate || "");
     }
 
     if (action === "sendtoop") {
@@ -898,7 +1103,16 @@ function saveOrderObject(rawData, isStaffRequest) {
   // website — never for a staff edit/re-save of an order that already
   // exists (existingIndex >= 0 means this was an update, not a new order).
   if (!isStaffRequest && existingIndex < 0) {
-    notifySalesOfNewOrder(orderRef);
+    // Logged so that if an email ever goes missing, "View > Executions" in
+    // the Apps Script editor says exactly what happened instead of nothing.
+    Logger.log("New-order sales alert: %s", JSON.stringify(notifySalesOfNewOrder(orderRef)));
+  } else if (existingIndex < 0) {
+    // Worth logging loudly: an order placed while you are logged into Staff
+    // Mode carries your staff token, so the system treats it as YOUR order
+    // and deliberately doesn't email you about your own order. That is the
+    // usual reason a test order seems to send no email — test in a private/
+    // incognito window to place one as a real customer would.
+    Logger.log("New order created by STAFF (staff token present) — new-order sales alert deliberately skipped.");
   }
 
   // Note: no spreadsheet URL or internal details are returned to the caller.
@@ -921,6 +1135,67 @@ function clearOrderDetailRows(detailSheet, orderRef) {
 /*****************************************************
  * UPDATE ORDER  (staff only — enforced in doPost)
  *****************************************************/
+/*****************************************************
+ * SET THE DELIVERY DATE  (staff only — enforced in doPost)
+ *
+ * The single action that replaces three separate steps. Customers no
+ * longer pick a delivery date at all — they can't reliably know which day
+ * their address is served on — so Sales sets it here, and setting it is
+ * what confirms the order and tells Operations. One click, nothing left
+ * half-done and nothing to remember.
+ *
+ * No lead-time or delivery-day rule is enforced here on purpose. Those
+ * rules existed to stop a CUSTOMER picking an impossible day; staff are
+ * the ones who actually know when a van is going out, including for a
+ * short-notice or off-schedule delivery. A Sunday or a very close date is
+ * flagged back as a `warning` for the dashboard to double-check, never
+ * refused.
+ *****************************************************/
+function setDeliveryDateAndConfirm(orderRef, deliveryDate) {
+  const ref = String(orderRef || "").trim();
+  if (!ref) return jsonResponse({ success: false, error: "Which order? No order reference was given." });
+
+  const date = String(deliveryDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return jsonResponse({ success: false, error: "Please choose a delivery date first." });
+  }
+  const parts = date.split("-").map(Number);
+  const parsed = new Date(parts[0], parts[1] - 1, parts[2]);
+  if (isNaN(parsed.getTime()) || parsed.getFullYear() !== parts[0] || parsed.getMonth() !== parts[1] - 1 || parsed.getDate() !== parts[2]) {
+    return jsonResponse({ success: false, error: "That isn't a real date." });
+  }
+
+  const warnings = [];
+  if (Number(Utilities.formatDate(parsed, Session.getScriptTimeZone(), "u")) === DELIVERY_CLOSED_WEEKDAY_ISO) {
+    warnings.push("That date is a Sunday, when we're normally closed.");
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (parsed.getTime() < today.getTime()) {
+    warnings.push("That date is in the past.");
+  }
+
+  const updates = { deliveryDate: date, status: "Confirmed" };
+
+  // Fill in the delivery area from BC_CUSTOMERS if the order hasn't got one.
+  // Operations needs to know WHERE it's going, and the customer was never
+  // asked — so the moment we know who they are, we look it up. An area
+  // already on the order (set by hand) is left exactly as it is.
+  const existing = fetchOrder(ref);
+  if (existing && !String(existing.deliveryArea || "").trim()) {
+    const match = findCustomerMatch(existing.company || existing.customer || "");
+    if (match) updates.deliveryArea = match.areaLabel;
+  }
+
+  const result = updateOrder(ref, updates);
+  const parsedResult = JSON.parse(result.getContent());
+  if (parsedResult.success) {
+    if (updates.deliveryArea) parsedResult.deliveryArea = updates.deliveryArea;
+    if (warnings.length) parsedResult.warning = warnings.join(" ");
+  }
+  return jsonResponse(parsedResult);
+}
+
 function updateOrder(orderRef, updates) {
   const header = getHeaderSheet();
   const rows = header.getDataRange().getValues();
@@ -1039,6 +1314,110 @@ function buildOpEmailSubject(order) {
  * "Draft"), which is different from notifyOperationsOfOrder() below —
  * that one fires later, once YOU confirm the order.
  *****************************************************/
+/*****************************************************
+ * SENDING THE EMAIL
+ *
+ * By default Google sends these alerts from the Gmail account that owns
+ * this script, which looks unprofessional next to a company address. Set
+ * the SEND_AS script property to your work address (e.g.
+ * difeng.soon@pastryworld.my) and they'll go out from that instead.
+ *
+ * Google will only do this for an address you have PROVEN you own, by
+ * adding it in Gmail: Settings > See all settings > Accounts and Import >
+ * "Send mail as" > Add another email address, then entering the code
+ * Google emails to that address. Until that's done, Google simply refuses.
+ *
+ * So SEND_AS is treated as a preference, never a requirement: if the
+ * address isn't verified yet we log why and still send the alert from the
+ * default account. A missed order email is far worse than one sent from
+ * the wrong address.
+ *****************************************************/
+function configuredSendAsAlias() {
+  const wanted = String(scriptProps().getProperty("SEND_AS") || "").trim();
+  if (!wanted) return "";
+  let aliases = [];
+  try {
+    aliases = GmailApp.getAliases() || [];
+  } catch (err) {
+    Logger.log("Couldn't read your Gmail 'Send mail as' addresses (%s) — sending from the default account.", err);
+    return "";
+  }
+  const verified = aliases.filter(a => String(a).toLowerCase() === wanted.toLowerCase())[0];
+  if (!verified) {
+    Logger.log(
+      "SEND_AS is set to %s but that address isn't verified in Gmail yet, so Google won't send as it. "
+      + "Add it under Gmail > Settings > Accounts and Import > 'Send mail as'. Verified addresses right now: %s. "
+      + "Sending from the default account in the meantime.",
+      wanted, aliases.length ? aliases.join(", ") : "(none)"
+    );
+    return "";
+  }
+  return verified;
+}
+
+/**
+ * One place every alert goes out through, so the From address, the sender
+ * name and the reply-to address stay consistent across all of them.
+ */
+function sendSystemEmail(to, subject, body) {
+  const alias = configuredSendAsAlias();
+  const options = { name: "PWDF Order System" };
+
+  // Reply-To is set from SEND_AS whether or not Google will send AS that
+  // address. It costs nothing, needs no verification, and means a reply
+  // lands in the work inbox rather than the Gmail account — which is most
+  // of what people actually want from a "company" sender anyway.
+  const preferredAddress = String(scriptProps().getProperty("SEND_AS") || "").trim();
+  if (preferredAddress) options.replyTo = preferredAddress;
+
+  if (alias) options.from = alias;
+  // GmailApp is what supports sending as a verified alias; MailApp cannot.
+  // Without an alias the two behave the same, so we only reach for GmailApp
+  // when there's something to gain.
+  if (alias) {
+    GmailApp.sendEmail(to, subject, body, options);
+  } else {
+    MailApp.sendEmail(Object.assign({ to: to, subject: subject, body: body }, options));
+  }
+  return alias || "default account";
+}
+
+/**
+ * Sends a test email to whatever SALES_EMAIL is set to, right now.
+ *
+ * Pick "testEmailNow" in the function dropdown at the top of the editor and
+ * click Run. If Google has never been given permission to send email from
+ * this script it will ask for it the first time — click through and Allow;
+ * that alone fixes the commonest cause of "no email arrives". Then open
+ * "Execution log" to see whether it sent, and check the junk folder too.
+ */
+function testEmailNow() {
+  const salesEmail = String(scriptProps().getProperty("SALES_EMAIL") || "").trim();
+  const opEmail = String(scriptProps().getProperty("OP_EMAIL") || "").trim();
+  const to = salesEmail || opEmail;
+  if (!to) {
+    Logger.log("Neither SALES_EMAIL nor OP_EMAIL is set — add one in Project Settings > Script Properties first.");
+    return;
+  }
+  Logger.log("Emails left in today's Google quota: %s", MailApp.getRemainingDailyQuota());
+  Logger.log("Sending a test email to: %s", to);
+  try {
+    const sentFrom = sendSystemEmail(
+      to,
+      "PWDF test email — please ignore",
+      "If you can read this, your order system is able to send email successfully.\n\n"
+        + "Sent at: " + new Date() + "\n\n"
+        + "If this arrived but your new-order alerts didn't, the orders were most likely placed\n"
+        + "while you were logged into Staff Mode — the system treats those as your own orders\n"
+        + "and doesn't email you about them. Place a test order in a private/incognito window."
+    );
+    Logger.log("SENT OK, from: %s", sentFrom);
+    Logger.log("Check the inbox AND the junk/spam folder for %s", to);
+  } catch (err) {
+    Logger.log("FAILED to send: %s", err);
+  }
+}
+
 function notifySalesOfNewOrder(orderRef) {
   const salesEmail = String(scriptProps().getProperty("SALES_EMAIL") || "").trim();
   if (!salesEmail) return { sent: false, reason: "SALES_EMAIL not configured" };
@@ -1048,7 +1427,29 @@ function notifySalesOfNewOrder(orderRef) {
 
   const who = order.company || order.customer || "A customer";
   const subject = `New order received — ${who} (${order.orderRef})`;
-  let body = `${who} just placed a new order on your website.\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\nDelivery Date: ${order.deliveryDate || "-"}\nDelivery Area: ${order.deliveryArea || "-"}\n`;
+  let body = `${who} just placed a new order on your website.\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\n`;
+
+  // Customers aren't asked for a delivery date any more, so a brand new
+  // order almost always arrives without one. Say what to do about it rather
+  // than printing an empty field.
+  if (order.deliveryDate) {
+    body += `Delivery Date: ${order.deliveryDate}\n`;
+  }
+  if (order.deliveryArea) {
+    body += `Delivery Area: ${order.deliveryArea}\n`;
+  }
+
+  // The area hint from BC_CUSTOMERS, so the delivery day is decidable
+  // straight from the email without opening anything.
+  const hint = order.deliveryArea ? null : findCustomerMatch(order.company || order.customer || "");
+  if (hint) {
+    const hintArea = getAreaById(hint.areaId);
+    const days = hintArea ? areaDeliveryWeekdays(hintArea).map(isoWeekdayName).join(", ") : "";
+    body += `Usual delivery area: ${hint.areaLabel}${days ? " (delivers " + days + ")" : ""}\n`;
+  } else if (!order.deliveryArea) {
+    body += `Usual delivery area: not on file — this may be a new customer.\n`;
+  }
+
   if (isUnlistedAreaOrder(order)) {
     body += `\n⚠ This customer's area was NOT in our delivery schedule — please confirm the exact delivery day with them directly.\n`;
   }
@@ -1056,12 +1457,14 @@ function notifySalesOfNewOrder(orderRef) {
   (order.items || []).forEach(item => {
     body += `${item.qty || 0} x ${item.name || item.code || "-"}${item.remark ? " (" + item.remark + ")" : ""}\n`;
   });
-  body += `\nThis order is still a DRAFT. Open your dashboard to review and confirm it — Operations won't be told about it until you do.`;
+  body += `\nNEXT STEP: open your dashboard and set the delivery date for this order. `
+    + `Setting the date confirms it and sends it to Operations in one go. `
+    + `Until then it stays a DRAFT and Operations knows nothing about it.`;
 
   try {
-    MailApp.sendEmail({ to: salesEmail, subject: subject, body: body });
-    return { sent: true };
+    return { sent: true, from: sendSystemEmail(salesEmail, subject, body) };
   } catch (err) {
+    Logger.log("Sales new-order email FAILED: %s", err);
     return { sent: false, reason: String(err) };
   }
 }
@@ -1085,9 +1488,9 @@ function notifyOperationsOfOrder(orderRef) {
   body += `\n(Confirmed by Sales — please proceed with preparation.)`;
 
   try {
-    MailApp.sendEmail({ to: opEmail, subject: subject, body: body });
-    return { sent: true };
+    return { sent: true, from: sendSystemEmail(opEmail, subject, body) };
   } catch (err) {
+    Logger.log("Operations email FAILED: %s", err);
     return { sent: false, reason: String(err) };
   }
 }
@@ -1244,25 +1647,57 @@ function fetchOrder(orderRef) {
 /*****************************************************
  * FETCH DRAFT ORDERS  (staff only — enforced in doGet)
  *****************************************************/
+/**
+ * Turns one ORDER_HEADER row into an order object, remembering which row of
+ * the sheet it came from so ties can be broken by "further down = newer".
+ */
+function orderFromHeaderRow(row, index) {
+  return {
+    orderRef: row[0],
+    customer: row[1],
+    company: row[2],
+    contact: row[3],
+    createdDate: row[4],
+    deliveryDate: row[5],
+    status: row[6],
+    itemCount: row[7],
+    opSentDate: row[8] ? formatSheetDate(row[8]) : "",
+    sentToOp: !!row[8],
+    deliveryArea: row[9] || "",
+    _sheetRow: index
+  };
+}
+
+function orderCreatedTime(order) {
+  const raw = order && order.createdDate;
+  if (raw instanceof Date) return raw.getTime();
+  const parsed = new Date(raw);
+  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+/**
+ * Newest first, then drop the internal sort key.
+ *
+ * A sales dashboard is read from the top, so an order that just came in has
+ * to be the first thing on the page. Straight sheet order buries it at the
+ * bottom of a list that only ever grows — which looks exactly like the order
+ * never arrived at all, even though it saved perfectly.
+ */
+function sortOrdersNewestFirst(orders) {
+  orders.sort((a, b) => (orderCreatedTime(b) - orderCreatedTime(a)) || (b._sheetRow - a._sheetRow));
+  orders.forEach(order => { delete order._sheetRow; });
+  return orders;
+}
+
 function fetchDraftOrders() {
   const header = getHeaderSheet();
   const rows = getDataRows(header, HEADER_COLUMNS);
 
-  return rows
-    .map(row => ({
-      orderRef: row[0],
-      customer: row[1],
-      company: row[2],
-      contact: row[3],
-      createdDate: row[4],
-      deliveryDate: row[5],
-      status: row[6],
-      itemCount: row[7],
-      opSentDate: row[8] ? formatSheetDate(row[8]) : "",
-      sentToOp: !!row[8],
-      deliveryArea: row[9] || ""
-    }))
-    .filter(order => String(order.status || "").toLowerCase() === "draft");
+  return sortOrdersNewestFirst(
+    rows
+      .map(orderFromHeaderRow)
+      .filter(order => String(order.status || "").toLowerCase() === "draft")
+  );
 }
 
 /*****************************************************
@@ -1277,21 +1712,11 @@ function getOrdersNeedingOp() {
   const header = getHeaderSheet();
   const rows = getDataRows(header, HEADER_COLUMNS);
 
-  return rows
-    .map(row => ({
-      orderRef: row[0],
-      customer: row[1],
-      company: row[2],
-      contact: row[3],
-      createdDate: row[4],
-      deliveryDate: row[5],
-      status: row[6],
-      itemCount: row[7],
-      opSentDate: row[8] ? formatSheetDate(row[8]) : "",
-      sentToOp: !!row[8],
-      deliveryArea: row[9] || ""
-    }))
-    .filter(order => String(order.status || "").toLowerCase() === "confirmed" && !order.sentToOp);
+  return sortOrdersNewestFirst(
+    rows
+      .map(orderFromHeaderRow)
+      .filter(order => String(order.status || "").toLowerCase() === "confirmed" && !order.sentToOp)
+  );
 }
 
 /*****************************************************
