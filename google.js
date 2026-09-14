@@ -131,6 +131,17 @@ async function postToGoogleApi(rawBody) {
       console.warn('Form POST attempt failed', e);
     }
 
+    // The JSONP fallback below can ONLY save an order — the server's
+    // script-tag path has no way to run anything else. Sending a specific
+    // action (setting a delivery date, confirming an order, saving a
+    // product) down it would silently be treated as an order save and come
+    // back reporting success, which is far worse than failing. So anything
+    // with an action of its own stops here with the real error.
+    if (body && body.action) {
+      console.warn("Not falling back to JSONP for action:", body.action);
+      return { success: false, error: "Couldn't reach the server. Please check your connection and try again." };
+    }
+
     console.warn("Attempting JSONP fallback after fetch failure:", err);
 
     // JSONP fallback: create a script tag with callback and payload

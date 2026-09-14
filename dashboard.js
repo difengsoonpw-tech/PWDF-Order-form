@@ -386,39 +386,98 @@ function openOrder(orderRef) {
   window.location.href = `edit.html?orderRef=${encodeURIComponent(orderRef)}`;
 }
 
-/* Ask for the delivery date, showing what we know about where this
-   customer is — their usual area and the next dates it's actually served
-   on — so the date can be picked without hunting through a calendar. */
+/* Ask for the delivery date with a real date picker.
+
+   This used to be a window.prompt asking for "YYYY-MM-DD", which is an
+   invitation to type "17/9/26 wednesday" — and the day someone did, the
+   request took a fallback path that saved it verbatim and reported
+   success. A date input can only ever produce a real date, so that whole
+   class of mistake is gone. */
+function askForDeliveryDate(orderRef, hint) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+
+    const box = document.createElement("div");
+    box.style.cssText = "background:#fff;border-radius:10px;padding:20px;max-width:420px;width:100%;font-family:inherit;box-shadow:0 10px 40px rgba(0,0,0,.3);";
+
+    let hintHtml = "";
+    if (hint && hint.match) {
+      hintHtml += `<div style="font-size:13px;color:#4a4a4a;margin-bottom:4px;"><strong>Usual area:</strong> ${escapeForDialog(hint.match.areaLabel)}</div>`;
+      if (hint.deliveryWeekdays && hint.deliveryWeekdays.length) {
+        hintHtml += `<div style="font-size:13px;color:#4a4a4a;margin-bottom:10px;"><strong>Delivers on:</strong> ${escapeForDialog(hint.deliveryWeekdays.join(", "))}</div>`;
+      }
+    } else if (hint && hint.note) {
+      hintHtml += `<div style="font-size:13px;color:#8a6d3b;margin-bottom:10px;">${escapeForDialog(hint.note)}</div>`;
+    }
+
+    const suggested = (hint && hint.suggestedDates && hint.suggestedDates[0]) || "";
+
+    box.innerHTML = `
+      <h3 style="margin:0 0 4px;font-size:17px;">Set delivery date</h3>
+      <div style="font-size:12px;color:#777;margin-bottom:12px;">${escapeForDialog(orderRef)}</div>
+      ${hintHtml}
+      <input type="date" id="ddPickerInput" value="${escapeForDialog(suggested)}"
+             style="width:100%;padding:9px;font-size:15px;border:1px solid #ccc;border-radius:6px;margin-bottom:10px;">
+      <div id="ddQuickPicks" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;"></div>
+      <div style="font-size:12.5px;color:#4a4a4a;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:6px;padding:9px;margin-bottom:14px;">
+        Saving this will <strong>confirm the order</strong> and <strong>email Operations</strong>.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="ddCancel" type="button" style="padding:9px 14px;">Cancel</button>
+        <button id="ddSave" type="button" style="padding:9px 16px;font-weight:600;">Save &amp; send</button>
+      </div>
+    `;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const input = box.querySelector("#ddPickerInput");
+
+    // One-click buttons for the next few dates this customer's area is
+    // actually served on, so the common case needs no typing at all.
+    const quick = box.querySelector("#ddQuickPicks");
+    ((hint && hint.suggestedDates) || []).forEach(d => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = d;
+      b.style.cssText = "padding:5px 9px;font-size:12.5px;cursor:pointer;";
+      b.onclick = () => { input.value = d; };
+      quick.appendChild(b);
+    });
+
+    const close = value => {
+      if (overlay.parentNode) document.body.removeChild(overlay);
+      resolve(value);
+    };
+    box.querySelector("#ddCancel").onclick = () => close(null);
+    box.querySelector("#ddSave").onclick = () => {
+      if (!input.value) { alert("Please pick a delivery date first."); return; }
+      close(input.value);
+    };
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(null); });
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
+function escapeForDialog(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 async function setDeliveryDateFlow(orderRef, company) {
-  let prompt_lines = ["Delivery date for " + orderRef + " (YYYY-MM-DD):", ""];
-  let suggested = "";
-
   const hint = await fetchDeliveryHint(company);
-  if (hint && hint.success && hint.match) {
-    prompt_lines.push("Usual area: " + hint.match.areaLabel);
-    if (hint.deliveryWeekdays && hint.deliveryWeekdays.length) {
-      prompt_lines.push("Delivers on: " + hint.deliveryWeekdays.join(", "));
-    }
-    if (hint.suggestedDates && hint.suggestedDates.length) {
-      prompt_lines.push("Next available: " + hint.suggestedDates.join(", "));
-      suggested = hint.suggestedDates[0];
-    }
-  } else if (hint && hint.note) {
-    prompt_lines.push(hint.note);
-  }
-  prompt_lines.push("");
-  prompt_lines.push("Setting the date will CONFIRM this order and email Operations.");
+  const chosen = await askForDeliveryDate(orderRef, hint && hint.success ? hint : null);
+  if (!chosen) return; // cancelled
 
-  const chosen = window.prompt(prompt_lines.join("\n"), suggested);
-  if (chosen === null) return; // cancelled
-
-  const result = await setDeliveryDate(orderRef, chosen.trim());
+  const result = await setDeliveryDate(orderRef, chosen);
   if (!result || result.success !== true) {
     alert((result && (result.error || result.message)) || "Could not set the delivery date.");
     return;
   }
 
-  let message = "Delivery date set to " + chosen.trim() + ". Order confirmed.";
+  let message = "Delivery date set to " + chosen + ". Order confirmed.";
   if (result.deliveryArea) message += "\nDelivery area filled in: " + result.deliveryArea;
   message += (result.opNotify && result.opNotify.sent)
     ? "\nOperations has been emailed."

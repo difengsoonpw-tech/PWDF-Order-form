@@ -847,6 +847,25 @@ function doGet(e) {
     const cb = String(params.callback || "").replace(/[^\w\_\$]/g, "");
     try {
       const payload = JSON.parse(String(params.payload || "{}"));
+
+      // This path can ONLY save an order. It used to ignore the payload's
+      // "action" completely and save whatever it was given, so a staff
+      // request that fell back to JSONP — setting a delivery date, say —
+      // silently turned into "save this as an order" and reported success.
+      // That wrote junk into a real order and skipped the Operations email.
+      // Anything with an action of its own is refused outright: better a
+      // visible error than a quiet, wrong success.
+      const requested = String(payload.action || "").toLowerCase();
+      if (requested && requested !== "saveorder") {
+        const refused = {
+          success: false,
+          error: "The '" + requested + "' action can't be sent this way. Please reload the page and try again."
+        };
+        return ContentService
+          .createTextOutput(`${cb}(${JSON.stringify(refused)});`)
+          .setMimeType(ContentService.MimeType.JAVASCRIPT);
+      }
+
       const staff = callerIsStaff(e, payload);
       const result = saveOrderObject(payload, staff);
       return ContentService
