@@ -6,16 +6,33 @@ function generateOrderRef() {
   return `PWDF-${datePart}-${timePart}-${randomPart}`;
 }
 
+/* Turns whatever the page is holding as a cart into the rows the sheet wants.
+
+   Accepts either a Map (what script.js.js's CART is) or a plain Array (what
+   the older edit page built), so both pages can share one save path.
+
+   The product code matters: it is what the price lookup and every later
+   report key on. A real code is always preferred. The old first-word-of-the-
+   name guess is kept only as a last resort for rows that genuinely have no
+   code — it is wrong for any product whose name doesn't start with its code. */
 function normalizeOrderItems(cart) {
-  return cart.map(item => ({
-    code: (item.item || "").split(" ")[0],
-    name: item.item || "",
-    qty: item.qty || 0,
-    remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
-    choice: item.choice || "",
-    addon: item.addon || "",
-    category: item.category || ""
-  }));
+  const list = cart instanceof Map
+    ? Array.from(cart.values())
+    : (Array.isArray(cart) ? cart : []);
+
+  return list.map(item => {
+    const name = item.name || item.item || "";
+    const code = String(item.code || "").trim() || name.split(" ")[0];
+    return {
+      code: code,
+      name: name,
+      qty: Number(item.qty) || 0,
+      remark: `${item.choice || ""} ${item.addon || ""}`.trim(),
+      choice: item.choice || "",
+      addon: item.addon || "",
+      category: item.category || ""
+    };
+  });
 }
 
 function buildOrderPayload({

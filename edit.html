@@ -4,10 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PWDF Edit Order</title>
+<link rel="stylesheet" href="product-list.css?v=3">
   <style>
+.list-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.list-head h3 { margin:0; }
+.list-head span { font-size:12px; color:#A99B7C; }
+#productList { max-height:520px; overflow-y:auto; margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.cart-total-row { display:flex; justify-content:space-between; align-items:center; padding:12px 0 4px; margin-top:8px; border-top:1px solid rgba(212,169,44,0.25); font-size:15px; }
+.summary-count { font-size:12px; color:#A99B7C; margin-top:8px; }
+[hidden] { display:none !important; }
 body { margin:0; font-family: Arial, sans-serif; background: #fff8e6; color:#222222; min-height:100vh; }
 header { display:flex; align-items:center; justify-content:space-between; padding:16px; background:#ffffff; position:sticky; top:0; z-index:1000; border-bottom:1px solid rgba(212,169,44,0.25); }
 header a, header button { color:#222222; text-decoration:none; background:none; border:1px solid rgba(212,169,44,0.55); padding:8px 12px; border-radius:10px; cursor:pointer; }
+/* The generic `input, textarea, select, button { width:100% }` rule below was
+   stretching the header's Logout button across the whole bar. */
+header button { width:auto; margin-top:0; white-space:nowrap; }
+header a { white-space:nowrap; }
 .container { max-width:1100px; margin:auto; padding:24px 16px 80px; }
 .order-header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:18px; }
 .order-header h2 { margin:0; }
@@ -65,27 +77,44 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     </div>
   </div>
   <div class="order-panel">
-    <h3>Add Products</h3>
-    <div id="searchBar">
-      <div class="search-controls">
-        <input id="smartSearchInput" placeholder="Search name / code / flavour…">
-        <select id="priceMapCategoryFilter" class="category-filter"></select>
-      </div>
+    <div class="list-head">
+      <h3 id="listTitle">Add Products</h3>
+      <span id="listCount"></span>
     </div>
-    <div id="menuContainer" class="container"></div>
+    <input id="searchInput" placeholder="Search name / code / flavour…">
+    <div id="categoryStrip" class="category-strip"></div>
+    <div id="productList"></div>
   </div>
+
   <div class="order-panel">
-    <h3>Cart</h3>
-    <div id="summaryPanel">
-      <div class="summary-info">
-        <div class="summary-left">
-          <div class="summary-count">Items: <span id="cartCountBottom">0</span></div>
-          <button id="submitOrderBtn" class="summary-btn">Review Order</button>
-        </div>
-      </div>
+    <div class="list-head">
+      <h3>Cart</h3>
+      <span id="orderSub">0 items</span>
     </div>
+    <div class="order-lines" id="orderLines">
+      <div class="order-empty">This order has no items yet.</div>
+    </div>
+    <div class="cart-total-row">
+      <span>Total</span>
+      <strong id="orderTotal">RM 0.00</strong>
+    </div>
+    <div class="action-row">
+      <button id="reviewBtnDesktop" class="primary">Review Order</button>
+    </div>
+    <div class="summary-count">Items: <span id="cartCountBottom">0</span></div>
   </div>
 </div>
+
+<!-- script.js.js was written for the customer page and addresses these by id
+     on load. The Edit page has no mobile order bar, but the ids must exist or
+     the shared code throws before it can render anything. Hidden on purpose —
+     null-guarding a dozen lines inside script.js.js would put the customer
+     page at risk for no gain here. -->
+<div id="mobileOrderBar" hidden>
+  <span id="mobCount"></span><span id="mobTotal"></span>
+  <button id="reviewBtnMobile" type="button"></button>
+</div>
+<div id="categoryRail" hidden></div>
 <div id="summaryPopup">
   <div class="summary-box">
     <div style="text-align:center; margin-bottom:16px;">
@@ -97,6 +126,7 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     </div>
     <h3>Cart</h3>
     <div id="popupSummary"></div>
+    <div class="cart-total-row"><span>Total</span><strong id="popupTotal">RM 0.00</strong></div>
     <br>
     <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:12px;">
       <button onclick="submitWhatsApp()" class="summary-btn" aria-label="Send WhatsApp">
@@ -131,12 +161,18 @@ button.secondary { background:transparent; color:#222222; border:1px solid rgba(
     </div>
   </div>
 </div>
-<script src="Product.js"></script>
-<script src="imageMap.js"></script>
-<script src="google.js"></script>
-<script src="order.js"></script>
-<script src="script.js.js"></script>
-<script src="edit.js"></script>
+<!-- Product.js (49KB of hard-coded products) and imageMap.js (empty) were the
+     old offline catalogue. Everything now comes live from the sheet, so the
+     tags are gone. The files are still in the repo if they are ever needed. -->
+<script>
+  /* Tells script.js.js not to auto-load the catalogue on DOMContentLoaded.
+     Must run BEFORE that script tag. See loadProducts() in script.js.js. */
+  window.PWDF_MANUAL_PRODUCT_LOAD = true;
+</script>
+<script src="google.js?v=3"></script>
+<script src="order.js?v=3"></script>
+<script src="script.js.js?v=3"></script>
+<script src="edit.js?v=3"></script>
 </body>
 </html>
 

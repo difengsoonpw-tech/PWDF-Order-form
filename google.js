@@ -2,6 +2,14 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyzjefQAgtsElv6ks29yZLt
 // Set your Make webhook URL here when available (e.g. https://hook.us1.make.com/xxxxx)
 const MAKE_WEBHOOK_URL = "https://hook.us1.make.com/your-webhook-url"; // Replace with actual Make.com webhook when ready
 
+/* Nothing depends on this webhook — Operations is emailed by the backend when
+   an order is confirmed. But the URL above is still the placeholder, so every
+   confirm and every edit-save was waiting on a hostname that doesn't resolve:
+   one to five seconds of nothing, on the exact click staff make most often.
+   Replacing "your-webhook-url" with a real one switches it back on by itself;
+   the calling code is untouched. */
+const MAKE_WEBHOOK_ENABLED = !/your-webhook-url/i.test(MAKE_WEBHOOK_URL);
+
 /*****************************************************
  * STAFF ACCESS TOKEN
  *
@@ -200,6 +208,7 @@ async function getFromGoogleApi(params = {}) {
 }
 
 async function triggerMakeWebhook(payload, options = { mode: 'cors', expectJson: true }) {
+  if (!MAKE_WEBHOOK_ENABLED) return { success: false, skipped: true };
   const mode = (options && options.mode) || 'cors';
   const expectJson = typeof (options && options.expectJson) === 'boolean' ? options.expectJson : true;
   try {

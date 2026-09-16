@@ -10,6 +10,17 @@
    ========================================= */
 
 const DECORATION_PRICE_TEXT = "Decoration + RM 10.50";
+
+/* These three mirror constants of the same name in PWDF-Order-API.gs. They let
+   the browser add up a cart it has already been quoted prices for, instead of
+   asking the server again every time someone taps + or -. If you ever change
+   the surcharge or the item cap in the .gs, change it here too — the server
+   stays the authority (it re-prices the whole cart before the order is
+   reviewed and again when it is saved), but keeping these in step means the
+   figure on screen never jumps when the server's answer arrives. */
+const DECORATION_SURCHARGE_AMOUNT = 10.50;
+const CART_CALC_MAX_ITEMS = 150;
+const CART_MAX_QTY = 100000;
 const ORDER_POLICY_TEXT = `
 ⚠ IMPORTANT:
 This order is considered CONFIRMED upon submission.
@@ -29,8 +40,17 @@ let CART = new Map();       // key `${code}::${choice}` -> {code,name,category,c
 let CURRENT_CATEGORY = "";  // "" = All products
 let CURRENT_SEARCH = "";
 let CURRENT_ORDER_REF = null;
-let LAST_PRICING = { total: 0, byKey: {} }; // key -> {unitPrice, lineTotal}
+let LAST_PRICING = { total: 0, byKey: {}, partial: false }; // key -> {unitPrice, lineTotal}
 let pricingDebounceHandle = null;
+
+/* Unit prices the server has already quoted, remembered by product code so
+   the same question is never asked twice. Deliberately in memory only — it is
+   never written to localStorage, so closing the tab forgets every price and a
+   shared laptop keeps nothing on disk. */
+let PRICE_MEMO = new Map();
+/* The exact cart the server last priced for us, so re-opening the review
+   popup on an unchanged cart doesn't fire the same request again. */
+let LAST_VERIFIED_SIGNATURE = "";
 
 /* ---------- DOM ---------- */
 const searchInput = document.getElementById("searchInput");
@@ -255,9 +275,23 @@ function getFilteredProducts() {
                  ignored rather than quietly adding the wrong product. */
 function productRowHtml(p) {
   const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
-  const initialChoice = choices.length ? choices[0] : "";
-  const line = CART.get(cartKey(p.code, initialChoice));
-  const qty = line ? line.qty : 0;
+
+  /* Show the option this product is actually in the cart under, not just the
+     first one in the list. Without this, a cake added as "90 CUT" redraws as
+     "45 CUT" with a quantity of 0 the moment the list is re-rendered — on a
+     search, a category change, or a background catalogue refresh — and on the
+     staff Edit page a whole saved order looks empty. */
+  let selectedChoice = choices.length ? choices[0] : "";
+  let qty = 0;
+  const candidates = choices.length ? choices : [""];
+  for (let i = 0; i < candidates.length; i++) {
+    const line = CART.get(cartKey(p.code, candidates[i]));
+    if (line && line.qty > 0) {
+      selectedChoice = candidates[i];
+      qty = line.qty;
+      break;
+    }
+  }
 
   // Only ever request a photo that is a real web address (the ones uploaded
   // via the staff portal's Drive photo tool). Older leftover values in the
@@ -276,7 +310,7 @@ function productRowHtml(p) {
       </div>
       <div class="opt-and-stepper">
         ${choices.length
-          ? `<select class="opt-select" data-act="choice">${choices.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>`
+          ? `<select class="opt-select" data-act="choice">${choices.map(c => `<option value="${escapeHtml(c)}"${c === selectedChoice ? " selected" : ""}>${escapeHtml(c)}</option>`).join("")}</select>`
           : `<span class="no-opt">—</span>`}
         <div class="stepper">
           <button type="button" class="minus" data-act="minus">–</button>
@@ -397,6 +431,9 @@ function refreshCartUI() {
   orderSub.textContent = `${count} item${count === 1 ? "" : "s"}`;
   mobCount.textContent = `${count} item${count === 1 ? "" : "s"}`;
   renderOrderPanel();
+  // Lets a page that reuses this renderer (the staff Edit page) keep its own
+  // extra bits of UI in step without having to patch this function.
+  if (typeof window.PWDF_ON_CART_CHANGE === "function") window.PWDF_ON_CART_CHANGE();
 }
 
 function renderOrderPanel() {
@@ -421,8 +458,11 @@ function renderOrderPanel() {
     `;
   });
   orderLines.innerHTML = html;
-  orderTotal.textContent = formatMoney(LAST_PRICING.total);
-  mobTotal.textContent = formatMoney(LAST_PRICING.total);
+  // While any line is still unpriced the running total would be short by that
+  // line, so show "…" rather than a number that is about to change.
+  const totalText = LAST_PRICING.partial ? "…" : formatMoney(LAST_PRICING.total);
+  orderTotal.textContent = totalText;
+  mobTotal.textContent = totalText;
 }
 
 /* ---------- live pricing (fetched only for what's in the cart) ---------- */
@@ -436,6 +476,66 @@ function buildCartItemsPayload() {
   return { keys, items };
 }
 
+/* A short fingerprint of the cart as it stands: every line's key, quantity and
+   whether the decoration add-on is on it — i.e. exactly the things that can
+   change the total. Sorted so the same cart always fingerprints the same way
+   regardless of the order items were added in. */
+function cartSignature() {
+  const parts = [];
+  CART.forEach((line, key) => {
+    parts.push(key + "|" + line.qty + "|" + (line.addon ? "1" : "0"));
+  });
+  return parts.sort().join(";");
+}
+
+/* Adds the cart up using prices the server has already given us, applying the
+   same clamp and the same decoration rule the server applies, so the figure
+   matches to the cent.
+
+   `complete` is false when even one line can't be worked out here — a product
+   whose price we've never been quoted, or a cart bigger than the server will
+   price in one go. In that case the caller must ask the server rather than
+   show a total that is quietly missing a line. */
+function computeLocalPricing() {
+  const byKey = {};
+  let total = 0;
+  let complete = CART.size <= CART_CALC_MAX_ITEMS;
+
+  CART.forEach((line, key) => {
+    if (!PRICE_MEMO.has(line.code)) {
+      complete = false;
+      return;
+    }
+    const unitPrice = PRICE_MEMO.get(line.code);
+    const qty = Math.max(0, Math.min(CART_MAX_QTY, Math.floor(Number(line.qty) || 0)));
+    let lineTotal = unitPrice * qty;
+    if (line.addon && decorationApplies(line.category, line.choice)) {
+      lineTotal += DECORATION_SURCHARGE_AMOUNT * qty;
+    }
+    byKey[key] = { unitPrice: unitPrice, lineTotal: lineTotal };
+    total += lineTotal;
+  });
+
+  return { total: total, byKey: byKey, complete: complete };
+}
+
+/* Show what we can work out right now. When a line is still unpriced the
+   panel shows "…" for that line and for the total, so an incomplete figure is
+   never mistaken for the real one. */
+function applyLocalPricing(local) {
+  LAST_PRICING = { total: local.total, byKey: local.byKey, partial: !local.complete };
+  renderPricingViews();
+  return local;
+}
+
+/* Redraw everywhere a price is shown. The review popup is only redrawn while
+   it is actually open, so a late-arriving price doesn't rebuild a hidden
+   panel — or, worse, wipe out the row the customer is typing a quantity into. */
+function renderPricingViews() {
+  renderOrderPanel();
+  if (summaryPopup && summaryPopup.style.display === "flex") renderPopupCart();
+}
+
 /* Counts pricing requests so a slow earlier one can't land after a newer
    one and overwrite the total with a figure for a cart the customer has
    since changed. */
@@ -444,10 +544,12 @@ let pricingSeq = 0;
 async function fetchCartPricing() {
   const { keys, items } = buildCartItemsPayload();
   if (!items.length) {
-    LAST_PRICING = { total: 0, byKey: {} };
+    LAST_PRICING = { total: 0, byKey: {}, partial: false };
+    LAST_VERIFIED_SIGNATURE = "";
     return LAST_PRICING;
   }
   const seq = ++pricingSeq;
+  const signature = cartSignature();
   const result = await postToGoogleApi({ action: "calculatecart", items });
   if (seq !== pricingSeq) return LAST_PRICING;   // superseded while in flight
   if (!result || result.success !== true || !Array.isArray(result.items)) {
@@ -457,36 +559,66 @@ async function fetchCartPricing() {
   result.items.forEach((it, i) => {
     const key = keys[i];
     if (key) byKey[key] = { unitPrice: it.unitPrice, lineTotal: it.lineTotal };
+    // Remember the unit price against its code. Every later quantity change
+    // for this product is then pure arithmetic we can do here, instantly.
+    if (it && it.code) PRICE_MEMO.set(it.code, Number(it.unitPrice) || 0);
   });
-  LAST_PRICING = { total: result.total, byKey };
+  LAST_PRICING = { total: result.total, byKey: byKey, partial: false };
+  LAST_VERIFIED_SIGNATURE = signature;
   return LAST_PRICING;
 }
 
+/* Called on every cart change.
+
+   The common case — changing the quantity of something already in the cart —
+   needs no server at all, because we were quoted that product's unit price
+   when it was first added. The total updates on the same tap.
+
+   A product we've never priced is the only thing that needs asking, and that
+   happens once per product, not once per tap. The short timer just lets a
+   quick burst of additions share a single request. */
 function schedulePricingRefresh() {
+  const local = applyLocalPricing(computeLocalPricing());
+  if (local.complete) {
+    if (pricingDebounceHandle) {
+      clearTimeout(pricingDebounceHandle);
+      pricingDebounceHandle = null;
+    }
+    return;
+  }
   if (pricingDebounceHandle) clearTimeout(pricingDebounceHandle);
   pricingDebounceHandle = setTimeout(async () => {
     pricingDebounceHandle = null;
     await fetchCartPricing();
-    renderOrderPanel();
-  }, 350);
+    renderPricingViews();
+  }, 120);
 }
 
-/* Price it now, cancelling any refresh that was already queued — otherwise
-   the queued one fires moments later and asks the server the same question
-   twice for one action. */
+/* Get the server's own figure for the cart as it stands, cancelling any
+   request that was already queued. Used before the customer reviews and
+   submits, so what they sign off on is the server's number and not ours.
+   Skipped only when the server has already priced this exact cart. */
 async function flushPricingRefresh() {
   if (pricingDebounceHandle) {
     clearTimeout(pricingDebounceHandle);
     pricingDebounceHandle = null;
   }
+  if (CART.size && cartSignature() === LAST_VERIFIED_SIGNATURE && !LAST_PRICING.partial) {
+    renderPricingViews();
+    return LAST_PRICING;
+  }
   await fetchCartPricing();
-  renderOrderPanel();
+  renderPricingViews();
+  return LAST_PRICING;
 }
 
-/* Only price if something is actually outstanding. Used at submit time,
-   where the review popup has almost always priced the cart already. */
+/* Only price if the figure on screen isn't already the server's. Used at
+   submit time, where the review popup has almost always priced it already. */
 async function ensurePricingCurrent() {
-  if (pricingDebounceHandle) await flushPricingRefresh();
+  if (!CART.size) return;
+  if (pricingDebounceHandle || LAST_PRICING.partial || cartSignature() !== LAST_VERIFIED_SIGNATURE) {
+    await flushPricingRefresh();
+  }
 }
 
 /* ---------- review / submit popup ---------- */
@@ -501,6 +633,13 @@ async function openOrderReview() {
   await flushPricingRefresh(); // accurate figure now, and cancels the queued one
   reviewBtnDesktop.disabled = false;
   reviewBtnMobile.disabled = false;
+  // The only way this is still true is that the server couldn't be reached,
+  // so we don't know the price of at least one line. Better to say so than to
+  // show a total that is quietly short.
+  if (LAST_PRICING.partial) {
+    alert("We couldn't get the prices for your order just now.\nPlease check your connection and tap Review again.");
+    return;
+  }
   renderPopupCart();
   summaryPopup.style.display = "flex";
   document.body.style.overflow = "hidden";
@@ -531,25 +670,26 @@ function renderPopupCart() {
     `;
   });
   popupSummary.innerHTML = html;
-  popupTotal.textContent = formatMoney(LAST_PRICING.total);
+  popupTotal.textContent = LAST_PRICING.partial ? "…" : formatMoney(LAST_PRICING.total);
 
   popupSummary.querySelectorAll(".cart-line").forEach(el => {
     const key = el.dataset.key;
     const line = CART.get(key);
     if (!line) return;
-    el.querySelector(".popup-qty").addEventListener("change", async (e) => {
+    // Both of these re-price from the codes we already hold, so the popup
+    // total moves on the same tap. The server still has the last word: the
+    // submit buttons call ensurePricingCurrent(), which notices the cart has
+    // changed since the server last saw it and re-prices once before saving.
+    el.querySelector(".popup-qty").addEventListener("change", (e) => {
       const qty = Math.max(1, Math.floor(Number(e.target.value) || 1));
       line.qty = qty;
       refreshCartUI();
-      await flushPricingRefresh();
+      schedulePricingRefresh();
       renderPopupCart();
       renderProductList();
     });
-    el.querySelector(".remove-line-btn").addEventListener("click", async () => {
-      removeCartLine(key);
-      // removeCartLine queues its own refresh; flushing runs it once instead
-      // of letting the queued one fire a second identical request.
-      await flushPricingRefresh();
+    el.querySelector(".remove-line-btn").addEventListener("click", () => {
+      removeCartLine(key); // queues its own refresh
       renderPopupCart();
     });
   });
@@ -564,6 +704,11 @@ function closeSummary() {
 function buildText() {
   if (!customerName.value || !brandName.value || !contactNumber.value) {
     alert("Please fill in Customer Name, Brand Name and Contact Number.");
+    return null;
+  }
+  // Never write a total into the order text while a line is still unpriced.
+  if (LAST_PRICING.partial) {
+    alert("We couldn't get the prices for your order just now.\nPlease check your connection and try again.");
     return null;
   }
   CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
@@ -675,6 +820,13 @@ if (searchInput) {
 if (reviewBtnDesktop) reviewBtnDesktop.addEventListener("click", openOrderReview);
 if (reviewBtnMobile) reviewBtnMobile.addEventListener("click", openOrderReview);
 
+/* The staff Edit page reuses this file's renderer, but has to load the
+   catalogue and the order being edited in a fixed order — catalogue first, so
+   the order's line items can be matched back to real products. It sets
+   window.PWDF_MANUAL_PRODUCT_LOAD before loading this script and calls
+   loadProducts() itself. Without this check both loads would race, and the
+   saved quantities would appear or vanish depending on which finished last. */
 document.addEventListener("DOMContentLoaded", () => {
+  if (window.PWDF_MANUAL_PRODUCT_LOAD) return;
   loadProducts();
 });

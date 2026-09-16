@@ -35,23 +35,38 @@ function populateCustomerFields(order) {
 async function loadOrderForEditing() {
   if (!orderRef) {
     alert("No order reference provided.");
-    return;
+    return false;
   }
   const order = await fetchOrder(orderRef);
   if (!order) {
-    alert("Unable to load order.");
-    return;
+    alert("Unable to load order " + orderRef + ".\nIt may have been renamed or removed.");
+    return false;
   }
   existingOrder = order;
   CURRENT_ORDER_REF = order.orderRef || order.OrderRef || orderRef;
   populateOrderHeader(order);
   populateCustomerFields(order);
   CART = parseOrderCart(order);
-  renderCart();
-  updateCounts();
-  populateCategoryFilter();
+  return true;
 }
 
+/* The sheet keeps the decoration add-on glued onto the end of the choice in a
+   single Remark column — see normalizeOrderItems in order.js, which writes
+   `${choice} ${addon}`. The add-on is always exactly this one phrase, so it
+   can be pulled back off again cleanly rather than being lost on re-save. */
+function splitRemark(remark) {
+  const text = String(remark == null ? "" : remark).trim();
+  if (!text) return { choice: "", addon: "" };
+  const at = text.indexOf(DECORATION_PRICE_TEXT);
+  if (at === -1) return { choice: text, addon: "" };
+  return { choice: text.slice(0, at).trim(), addon: DECORATION_PRICE_TEXT };
+}
+
+/* Rebuilds the saved order as a CART — the same Map, with the same keys, that
+   script.js.js's renderer, stepper and pricing all expect. Must run AFTER the
+   catalogue has loaded, because that is what supplies each line's category
+   (the sheet's detail rows don't carry it) and the decoration rule depends on
+   it. */
 function parseOrderCart(order) {
   const itemsSource = order.items || order.Items || order.orderJson || order.OrderJson || "[]";
   let items = itemsSource;
@@ -65,17 +80,33 @@ function parseOrderCart(order) {
     }
   }
 
-  if (!Array.isArray(items)) {
-    return [];
-  }
+  const cart = new Map();
+  if (!Array.isArray(items)) return cart;
 
-  return items.map(item => ({
-    item: item.name || item.item || "",
-    qty: Number(item.qty) || 1,
-    choice: item.choice || item.remark || "",
-    addon: item.addon || "",
-    category: item.category || ""
-  }));
+  const byCode = new Map();
+  ALL_PRODUCTS.forEach(p => { if (p && p.code) byCode.set(String(p.code), p); });
+
+  items.forEach(item => {
+    const name = item.name || item.item || "";
+    // The real product code is stored in the sheet's detail row. Use it.
+    const code = String(item.code || "").trim() || name.split(" ")[0];
+    const product = byCode.get(code);
+    const parts = item.choice !== undefined || item.addon !== undefined
+      ? { choice: item.choice || "", addon: item.addon || "" }
+      : splitRemark(item.remark);
+
+    const line = {
+      code: code,
+      name: product ? product.name : name,
+      category: item.category || (product ? product.category : ""),
+      choice: parts.choice,
+      addon: parts.addon,
+      qty: Math.max(1, Math.floor(Number(item.qty) || 1))
+    };
+    cart.set(cartKey(line.code, line.choice), line);
+  });
+
+  return cart;
 }
 
 async function saveDraftOrder() {
@@ -192,7 +223,16 @@ function logoutStaff() {
   window.location.href = "staff.html";
 }
 
-window.addEventListener("DOMContentLoaded", () => {
+/* Keeps the small "Items: n" counter under the cart in step. The rest of the
+   cart UI is script.js.js's refreshCartUI(). */
+function updateCartCountLabel() {
+  const el = document.getElementById("cartCountBottom");
+  if (el) el.textContent = String(cartQtyTotal());
+}
+// script.js.js calls this every time the cart changes.
+window.PWDF_ON_CART_CHANGE = updateCartCountLabel;
+
+window.addEventListener("DOMContentLoaded", async () => {
   // This page edits existing orders, so it is staff-only. The server also
   // enforces this, but redirecting here gives a clearer experience than
   // showing an empty page.
@@ -202,6 +242,25 @@ window.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  populateCategoryFilter();
-  if (orderRef) loadOrderForEditing();
+  /* Order matters. The catalogue has to be in memory before the order is
+     parsed, because parseOrderCart looks each saved line up by code to
+     recover its category and current name. Then the list is redrawn so the
+     steppers show the saved quantities, and the cart panel is filled in. */
+  await loadProducts();
+
+  if (!orderRef) {
+    alert("No order reference provided.");
+    return;
+  }
+
+  const loaded = await loadOrderForEditing();
+  if (!loaded) return;
+
+  renderProductList();
+  refreshCartUI();
+  updateCartCountLabel();
+  /* Nothing in this order has been priced yet — the sheet stores quantities,
+     not money. Ask the server once for the lines it contains, after which
+     every quantity change on this page is worked out locally. */
+  schedulePricingRefresh();
 });
