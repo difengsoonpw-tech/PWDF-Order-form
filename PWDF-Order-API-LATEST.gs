@@ -133,6 +133,24 @@ function checkSetup() {
     Logger.log("SEND_AS set        : %s, but NOT verified in Gmail yet — see the note logged just above", sendAsWanted);
   }
 
+  if (!emailQueueEnabled()) {
+    Logger.log("EMAIL_VIA_QUEUE   : NO — alerts are sent straight from this Google account (they may land in Junk)");
+  } else {
+    Logger.log("EMAIL_VIA_QUEUE   : YES — alerts are written to the EMAIL_QUEUE tab for Power Automate to send from Outlook");
+    const queue = pendingEmailSummary();
+    if (!queue.count) {
+      Logger.log("  Queue is empty — Power Automate has picked everything up.");
+    } else if (queue.oldestMinutes <= 20) {
+      Logger.log("  %s email(s) waiting, oldest %s minute(s) old — normal, the flow runs every few minutes.", queue.count, queue.oldestMinutes);
+    } else {
+      // Queueing always "succeeds", so a flow that has stopped running is
+      // otherwise completely silent. This is the only place it shows up.
+      Logger.log("  WARNING: %s email(s) still waiting, oldest %s minute(s) old.", queue.count, queue.oldestMinutes);
+      Logger.log("  Power Automate does not look to be picking them up. Check the flow's run history —");
+      Logger.log("  a flow that is turned off or erroring means NOBODY is being emailed about new orders.");
+    }
+  }
+
   if (token && token.length < 12) {
     Logger.log("WARNING: STAFF_TOKEN is short. Use at least 12 characters.");
   }
@@ -1378,7 +1396,78 @@ function configuredSendAsAlias() {
  * One place every alert goes out through, so the From address, the sender
  * name and the reply-to address stay consistent across all of them.
  */
-function sendSystemEmail(to, subject, body) {
+/*****************************************************
+ * THE EMAIL QUEUE  (for Power Automate)
+ *
+ * Google can only send these alerts from the Gmail account that owns this
+ * script, and Pastry World's mail system treats mail from Google as
+ * suspicious — every alert was landing in Junk, including the ones meant
+ * for Operations. Sending as the work address through Google doesn't fix
+ * that; it makes it worse, because then Google is impersonating the
+ * company's own domain.
+ *
+ * So instead of sending the email, this writes it as a row in an
+ * EMAIL_QUEUE tab. A Power Automate flow (included with Microsoft 365 —
+ * no extra licence, the Google Sheets connector is a Standard one) watches
+ * that tab and sends each row from the real Outlook account. The mail then
+ * travels Microsoft-to-Microsoft, properly authenticated, and lands in the
+ * inbox instead of Junk — for Operations as well.
+ *
+ * Turn it on with a script property:  EMAIL_VIA_QUEUE = yes
+ * Leave it unset and everything behaves exactly as before, sending
+ * straight from Gmail.
+ *****************************************************/
+const SHEET_EMAIL_QUEUE = "EMAIL_QUEUE";
+const EMAIL_QUEUE_COLUMNS = ["Queued At", "To", "Subject", "Body", "Body HTML", "Order Ref", "Kind", "Status"];
+
+function getEmailQueueSheet() {
+  return getSheetOrCreate(SHEET_EMAIL_QUEUE, EMAIL_QUEUE_COLUMNS);
+}
+
+function emailQueueEnabled() {
+  return String(scriptProps().getProperty("EMAIL_VIA_QUEUE") || "").trim().toLowerCase() === "yes";
+}
+
+/** Plain text -> HTML, so the mail keeps its line breaks whichever body Power Automate is pointed at. */
+function emailBodyAsHtml(body) {
+  return String(body || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\r\n|\r|\n/g, "<br>");
+}
+
+function queueSystemEmail(to, subject, body, meta) {
+  const info = meta || {};
+  getEmailQueueSheet().appendRow([
+    new Date(), to, subject, body, emailBodyAsHtml(body),
+    info.orderRef || "", info.kind || "", "Pending"
+  ]);
+  return "queued for Power Automate";
+}
+
+/**
+ * How many queued emails Power Automate hasn't picked up yet, and how old
+ * the oldest one is. If this keeps growing, the flow isn't running — which
+ * would otherwise be invisible, since queueing always "succeeds".
+ */
+function pendingEmailSummary() {
+  const sheet = getEmailQueueSheet();
+  const rows = getDataRows(sheet, EMAIL_QUEUE_COLUMNS);
+  const pending = rows.filter(r => String(r[7] || "").trim().toLowerCase() !== "sent");
+  if (!pending.length) return { count: 0, oldestMinutes: 0 };
+  const oldest = pending.reduce((min, r) => {
+    const t = r[0] instanceof Date ? r[0].getTime() : new Date(r[0]).getTime();
+    return isNaN(t) ? min : Math.min(min, t);
+  }, Date.now());
+  return { count: pending.length, oldestMinutes: Math.round((Date.now() - oldest) / 60000) };
+}
+
+function sendSystemEmail(to, subject, body, meta) {
+  // When the queue is on, writing the row IS the send — Power Automate
+  // does the rest. Nothing is sent from Gmail, so nothing is duplicated.
+  if (emailQueueEnabled()) {
+    return queueSystemEmail(to, subject, body, meta);
+  }
+
   const alias = configuredSendAsAlias();
   const options = { name: "PWDF Order System" };
 
@@ -1410,6 +1499,55 @@ function sendSystemEmail(to, subject, body) {
  * that alone fixes the commonest cause of "no email arrives". Then open
  * "Execution log" to see whether it sent, and check the junk folder too.
  */
+/**
+ * SETTING UP POWER AUTOMATE — run this one FIRST.
+ *
+ * Creates the EMAIL_QUEUE tab if it isn't there yet and drops a single
+ * test email into it, WITHOUT switching your live alerts over. Real
+ * alerts keep going out the old way until you add the EMAIL_VIA_QUEUE
+ * script property, so you are never left without them while setting up.
+ *
+ * You need this because Power Automate can't be pointed at a worksheet
+ * that doesn't exist yet, and you want a row sitting in it to test the
+ * flow against before any real order depends on it.
+ *
+ * Order of play:
+ *   1. Run this function.            -> EMAIL_QUEUE tab + one Pending row
+ *   2. Build the flow in Power Automate, point it at that tab, test it.
+ *   3. Test email arrives from Outlook? Then set EMAIL_VIA_QUEUE = yes.
+ */
+function testEmailViaQueue() {
+  const salesEmail = String(scriptProps().getProperty("SALES_EMAIL") || "").trim();
+  const opEmail = String(scriptProps().getProperty("OP_EMAIL") || "").trim();
+  const to = salesEmail || opEmail;
+  if (!to) {
+    Logger.log("Neither SALES_EMAIL nor OP_EMAIL is set — add one in Project Settings > Script Properties first.");
+    return;
+  }
+
+  queueSystemEmail(
+    to,
+    "PWDF queue test — please ignore",
+    "This email was written into the EMAIL_QUEUE tab of your order sheet, not sent by Google.\n\n"
+      + "If it reached you from your own work address, Power Automate is working and you can switch\n"
+      + "the order system over by adding the script property EMAIL_VIA_QUEUE = yes.\n\n"
+      + "Queued at: " + new Date(),
+    { kind: "Test" }
+  );
+
+  const queue = pendingEmailSummary();
+  Logger.log("Done. The EMAIL_QUEUE tab now exists and holds a test email addressed to %s.", to);
+  Logger.log("Emails waiting in the queue: %s", queue.count);
+  Logger.log("");
+  Logger.log("NOTHING has changed about your live alerts — they still send the old way until you");
+  Logger.log("add the script property EMAIL_VIA_QUEUE with the value: yes");
+  Logger.log("");
+  Logger.log("Next: in Power Automate build a flow with the Google Sheets trigger");
+  Logger.log("'When a new row is added', pointed at this spreadsheet's EMAIL_QUEUE worksheet,");
+  Logger.log("then an Office 365 Outlook 'Send an email (V2)' step using the To, Subject and");
+  Logger.log("Body HTML columns. Run the flow's test and check whether this email arrives.");
+}
+
 function testEmailNow() {
   const salesEmail = String(scriptProps().getProperty("SALES_EMAIL") || "").trim();
   const opEmail = String(scriptProps().getProperty("OP_EMAIL") || "").trim();
@@ -1428,10 +1566,17 @@ function testEmailNow() {
         + "Sent at: " + new Date() + "\n\n"
         + "If this arrived but your new-order alerts didn't, the orders were most likely placed\n"
         + "while you were logged into Staff Mode — the system treats those as your own orders\n"
-        + "and doesn't email you about them. Place a test order in a private/incognito window."
+        + "and doesn't email you about them. Place a test order in a private/incognito window.",
+      { kind: "Test" }
     );
-    Logger.log("SENT OK, from: %s", sentFrom);
-    Logger.log("Check the inbox AND the junk/spam folder for %s", to);
+    if (emailQueueEnabled()) {
+      Logger.log("QUEUED OK for %s — it is now a 'Pending' row in the EMAIL_QUEUE tab.", to);
+      Logger.log("Power Automate should pick it up within about 5-15 minutes and send it from Outlook.");
+      Logger.log("If nothing arrives, check the flow's run history in Power Automate.");
+    } else {
+      Logger.log("SENT OK, from: %s", sentFrom);
+      Logger.log("Check the inbox AND the junk/spam folder for %s", to);
+    }
   } catch (err) {
     Logger.log("FAILED to send: %s", err);
   }
@@ -1481,7 +1626,7 @@ function notifySalesOfNewOrder(orderRef) {
     + `Until then it stays a DRAFT and Operations knows nothing about it.`;
 
   try {
-    return { sent: true, from: sendSystemEmail(salesEmail, subject, body) };
+    return { sent: true, from: sendSystemEmail(salesEmail, subject, body, { orderRef: order.orderRef, kind: "New order" }) };
   } catch (err) {
     Logger.log("Sales new-order email FAILED: %s", err);
     return { sent: false, reason: String(err) };
@@ -1507,7 +1652,7 @@ function notifyOperationsOfOrder(orderRef) {
   body += `\n(Confirmed by Sales — please proceed with preparation.)`;
 
   try {
-    return { sent: true, from: sendSystemEmail(opEmail, subject, body) };
+    return { sent: true, from: sendSystemEmail(opEmail, subject, body, { orderRef: order.orderRef, kind: "To Operations" }) };
   } catch (err) {
     Logger.log("Operations email FAILED: %s", err);
     return { sent: false, reason: String(err) };
