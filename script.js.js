@@ -31,6 +31,7 @@ let CURRENT_SEARCH = "";
 let CURRENT_ORDER_REF = null;
 let LAST_PRICING = { total: 0, byKey: {} }; // key -> {unitPrice, lineTotal}
 let pricingDebounceHandle = null;
+let searchDebounceHandle = null;
 
 /* ---------- DOM ---------- */
 const searchInput = document.getElementById("searchInput");
@@ -162,7 +163,11 @@ function renderProductList() {
     return;
   }
 
-  productList.innerHTML = "";
+  // Build every row off-screen and insert them all in one go — appending
+  // each row straight into productList one at a time forces the browser to
+  // reflow the page after every single item, which is what made a long
+  // list (or a search retyped fast) feel sluggish to render.
+  const fragment = document.createDocumentFragment();
   filtered.forEach(p => {
     const row = document.createElement("div");
     row.className = "product-row";
@@ -233,8 +238,10 @@ function renderProductList() {
     }
 
     syncQtyDisplay();
-    productList.appendChild(row);
+    fragment.appendChild(row);
   });
+  productList.innerHTML = "";
+  productList.appendChild(fragment);
 }
 
 /* ---------- cart ---------- */
@@ -507,9 +514,14 @@ async function submitWhatsApp() {
 
 /* ---------- wire up ---------- */
 if (searchInput) {
+  // Debounced: renderProductList() rebuilds the whole list, so re-running it
+  // on every single keystroke made fast typing feel laggy. Waiting for a
+  // short pause before re-rendering keeps the input itself instant while
+  // still updating the list almost immediately after typing stops.
   searchInput.addEventListener("input", (e) => {
     CURRENT_SEARCH = e.target.value;
-    renderProductList();
+    if (searchDebounceHandle) clearTimeout(searchDebounceHandle);
+    searchDebounceHandle = setTimeout(renderProductList, 150);
   });
 }
 if (reviewBtnDesktop) reviewBtnDesktop.addEventListener("click", openOrderReview);
