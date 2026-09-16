@@ -163,13 +163,24 @@ function checkSetup() {
   }
 }
 
+/* Opening the spreadsheet is a round trip, and a single request used to do
+   it a dozen times over. Apps Script gives every request a fresh global
+   scope, so remembering it in a module-level variable lasts exactly one
+   request — long enough to help, too short to ever go stale. */
+let SPREADSHEET_MEMO = null;
+
 function getSpreadsheet() {
+  if (SPREADSHEET_MEMO) return SPREADSHEET_MEMO;
   const id = getConfiguredSpreadsheetId();
   if (id) {
-    return SpreadsheetApp.openById(id);
+    SPREADSHEET_MEMO = SpreadsheetApp.openById(id);
+    return SPREADSHEET_MEMO;
   }
   const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (active) return active;
+  if (active) {
+    SPREADSHEET_MEMO = active;
+    return SPREADSHEET_MEMO;
+  }
   throw new Error("SPREADSHEET_ID script property is not set. Run checkSetup().");
 }
 
@@ -578,9 +589,15 @@ function ensureSettingsSheet(settingSheet) {
   return settingSheet;
 }
 
+let HEADER_SHEET_MEMO = null;
+
 function getHeaderSheet() {
+  // Setting one delivery date used to call this four times, each one paying
+  // the ensureHeaderColumns cost again. Same per-request lifetime as above.
+  if (HEADER_SHEET_MEMO) return HEADER_SHEET_MEMO;
   const sheet = getSheetOrCreate(SHEET_HEADER, HEADER_COLUMNS);
   ensureHeaderColumns(sheet);
+  HEADER_SHEET_MEMO = sheet;
   return sheet;
 }
 
@@ -593,22 +610,32 @@ function getHeaderSheet() {
  * safe to run every time a sheet is opened.
  */
 function ensureHeaderColumns(sheet) {
+  // Read the whole header row in one go and write it back only if something
+  // was actually missing. This used to be up to eleven separate spreadsheet
+  // round trips on EVERY request, which is a tax paid by every customer
+  // order and every dashboard click.
+  const width = Math.max(sheet.getLastColumn(), HEADER_COLUMNS.length);
+  const current = sheet.getRange(1, 1, 1, width).getValues()[0] || [];
+  const next = current.slice();
+  let changed = false;
+
   HEADER_COLUMNS.forEach((columnName, index) => {
-    const colNum = index + 1;
-    const lastCol = sheet.getLastColumn();
-    if (colNum > lastCol) {
-      sheet.getRange(1, colNum).setValue(columnName);
-      return;
-    }
-    const existingHeader = String(sheet.getRange(1, colNum).getValue() || "").trim();
-    if (!existingHeader) {
-      sheet.getRange(1, colNum).setValue(columnName);
+    if (String(next[index] === undefined ? "" : next[index]).trim() === "") {
+      next[index] = columnName;
+      changed = true;
     }
   });
+
+  if (changed) sheet.getRange(1, 1, 1, width).setValues([next]);
+  return changed;
 }
 
+let DETAIL_SHEET_MEMO = null;
+
 function getDetailSheet() {
-  return getSheetOrCreate(SHEET_DETAIL, DETAIL_COLUMNS);
+  if (DETAIL_SHEET_MEMO) return DETAIL_SHEET_MEMO;
+  DETAIL_SHEET_MEMO = getSheetOrCreate(SHEET_DETAIL, DETAIL_COLUMNS);
+  return DETAIL_SHEET_MEMO;
 }
 
 function getCustomersSheet() {
@@ -914,7 +941,7 @@ function doGet(e) {
 
   // Catalogue for the website. Public callers get no prices and no hidden rows.
   if (action === "getproducts") {
-    return jsonResponse({ success: true, products: getProducts(callerIsStaff(e, null)) });
+    return jsonResponse({ success: true, products: getProductsCached(callerIsStaff(e, null)) });
   }
 
   // Public — lets the customer order page set its date-picker's earliest
@@ -978,7 +1005,7 @@ function doGet(e) {
       return jsonResponse(getOrdersNeedingOp());
 
     case "getprices":
-      return jsonResponse({ success: true, prices: getWholesalePrices() });
+      return jsonResponse({ success: true, prices: getWholesalePricesCached() });
 
     // Staff only, and deliberately so. Customers no longer see anything
     // about delivery areas, so nothing about the customer list is exposed
@@ -1224,7 +1251,15 @@ function setDeliveryDateAndConfirm(orderRef, deliveryDate) {
     if (match) updates.deliveryArea = match.areaLabel;
   }
 
-  const result = updateOrder(ref, updates);
+  // Hand the order we already loaded to updateOrder, so the Operations email
+  // doesn't re-read the whole ORDER_DETAIL sheet to build itself.
+  //
+  // The overlay is essential, not tidiness: `existing` was read BEFORE the
+  // new values were written, so passing it unchanged would make the email
+  // say "Delivery Date: -" and "Delivery Area: -" — precisely the two facts
+  // Operations needs. updateOrder never touches the items array, and that
+  // array is the expensive part, so reusing it is always safe.
+  const result = updateOrder(ref, updates, existing ? Object.assign({}, existing, updates) : null);
   const parsedResult = JSON.parse(result.getContent());
   if (parsedResult.success) {
     if (updates.deliveryArea) parsedResult.deliveryArea = updates.deliveryArea;
@@ -1233,7 +1268,7 @@ function setDeliveryDateAndConfirm(orderRef, deliveryDate) {
   return jsonResponse(parsedResult);
 }
 
-function updateOrder(orderRef, updates) {
+function updateOrder(orderRef, updates, prefetchedOrder) {
   const header = getHeaderSheet();
   const rows = header.getDataRange().getValues();
   let foundRow = null;
@@ -1275,7 +1310,7 @@ function updateOrder(orderRef, updates) {
   if (String(updates.status || "").toLowerCase() === "confirmed") {
     const alreadySent = header.getRange(foundRow, OP_SENT_COLUMN).getValue();
     if (!alreadySent) {
-      opNotify = notifyOperationsOfOrder(orderRef);
+      opNotify = notifyOperationsOfOrder(orderRef, prefetchedOrder);
       if (opNotify && opNotify.sent) {
         header.getRange(foundRow, OP_SENT_COLUMN).setValue(new Date());
       }
@@ -1633,11 +1668,17 @@ function notifySalesOfNewOrder(orderRef) {
   }
 }
 
-function notifyOperationsOfOrder(orderRef) {
+/**
+ * `prefetchedOrder` lets a caller that has already loaded the order hand it
+ * over instead of making this re-read it. fetchOrder scans the whole
+ * ORDER_DETAIL sheet — every line of every order ever placed — so doing
+ * that twice for one click is the most expensive thing in the request.
+ */
+function notifyOperationsOfOrder(orderRef, prefetchedOrder) {
   const opEmail = String(scriptProps().getProperty("OP_EMAIL") || "").trim();
   if (!opEmail) return { sent: false, reason: "OP_EMAIL not configured" };
 
-  const order = fetchOrder(orderRef);
+  const order = prefetchedOrder || fetchOrder(orderRef);
   if (!order) return { sent: false, reason: "order not found" };
 
   const subject = buildOpEmailSubject(order);
@@ -2000,6 +2041,113 @@ function generateOrderRef(settingSheet) {
  *****************************************************/
 const SHEET_PRODUCTS = "PRODUCTS";
 
+/*****************************************************
+ * PRODUCT CACHE
+ *
+ * Every customer opening the order page used to make this script reopen
+ * the spreadsheet and re-read all ~341 product rows. That single request
+ * was the entire wait before the menu appeared. The catalogue changes a
+ * few times a week at most, so re-reading it for every visitor is pure
+ * waste.
+ *
+ * Two rules this cache is built around:
+ *
+ * 1. WHAT IS CACHED IS THE ALREADY-FILTERED ANSWER, never the raw sheet
+ *    rows. Raw rows carry wholesale prices. By caching the output of
+ *    getProducts(isStaff) instead, the public cache entry structurally
+ *    cannot contain a price — so even a key mix-up leaks nothing.
+ *    Staff and public therefore get separate keys.
+ *
+ * 2. A CACHE FAILURE MUST NEVER BE AN OUTAGE. Every read and write is
+ *    wrapped; anything unexpected falls through to reading the sheet
+ *    exactly as before.
+ *
+ * Values are gzipped because CacheService caps a value at 100KB and the
+ * catalogue is ~62KB of very repetitive JSON, which compresses to
+ * roughly a quarter of that. Deliberately NOT split across several keys:
+ * Apps Script can evict keys independently, so a chunked value can come
+ * back half-missing and reassemble into corrupt JSON.
+ *****************************************************/
+const PRODUCT_CACHE_VERSION = "v1";
+const PRODUCT_CACHE_TTL_SECONDS = 600;   // catalogue: names, categories, options
+const PRICES_CACHE_TTL_SECONDS = 120;    // prices: shorter, money deserves it
+const CACHE_MAX_VALUE_BYTES = 95000;     // CacheService hard limit is 100KB
+const PRICES_CACHE_KEY = "pwdf.prices." + PRODUCT_CACHE_VERSION;
+
+function productsCacheKey(isStaffRequest) {
+  return "pwdf.products." + (isStaffRequest ? "staff" : "public") + "." + PRODUCT_CACHE_VERSION;
+}
+
+function cacheGetJson(key) {
+  try {
+    const raw = CacheService.getScriptCache().get(key);
+    if (!raw) return null;
+    const gz = Utilities.newBlob(Utilities.base64Decode(raw), "application/x-gzip");
+    return JSON.parse(Utilities.ungzip(gz).getDataAsString("UTF-8"));
+  } catch (err) {
+    Logger.log("Cache read failed for %s (ignored, reading live): %s", key, err);
+    return null;
+  }
+}
+
+function cachePutJson(key, value, ttlSeconds) {
+  try {
+    const encoded = Utilities.base64Encode(
+      Utilities.gzip(Utilities.newBlob(JSON.stringify(value), "application/json")).getBytes()
+    );
+    if (encoded.length > CACHE_MAX_VALUE_BYTES) {
+      // Too big to cache — serve live rather than throw. This only happens
+      // if the catalogue grows several times over, and it degrades to the
+      // old behaviour rather than breaking.
+      Logger.log("Cache skipped for %s: %s bytes compressed, over the limit.", key, encoded.length);
+      return;
+    }
+    CacheService.getScriptCache().put(key, encoded, ttlSeconds);
+  } catch (err) {
+    Logger.log("Cache write failed for %s (ignored): %s", key, err);
+  }
+}
+
+function getProductsCached(isStaffRequest) {
+  const key = productsCacheKey(isStaffRequest);
+  const hit = cacheGetJson(key);
+  if (hit && Array.isArray(hit) && hit.length) return hit;
+  const fresh = getProducts(isStaffRequest);
+  cachePutJson(key, fresh, PRODUCT_CACHE_TTL_SECONDS);
+  return fresh;
+}
+
+function getWholesalePricesCached() {
+  const hit = cacheGetJson(PRICES_CACHE_KEY);
+  if (hit && typeof hit === "object") return hit;
+  const fresh = getWholesalePrices();
+  cachePutJson(PRICES_CACHE_KEY, fresh, PRICES_CACHE_TTL_SECONDS);
+  return fresh;
+}
+
+/**
+ * Called whenever a product is saved, so a price or name change shows up
+ * on the customer's menu immediately instead of waiting for the TTL.
+ */
+function invalidateProductCache() {
+  try {
+    CacheService.getScriptCache().removeAll([
+      productsCacheKey(true), productsCacheKey(false), PRICES_CACHE_KEY
+    ]);
+  } catch (err) {
+    Logger.log("Cache clear failed (ignored): %s", err);
+  }
+}
+
+/**
+ * Run this from the Apps Script editor if you edited the PRODUCTS tab by
+ * hand and want the change live right now rather than within 10 minutes.
+ */
+function clearProductCacheNow() {
+  invalidateProductCache();
+  Logger.log("Product cache cleared. The next customer to open the page will get fresh data.");
+}
+
 function readProductSheet() {
   var sheet;
   try {
@@ -2108,7 +2256,7 @@ const CART_CALC_MAX_ITEMS = 150;
 
 function calculateCartTotal(rawItems) {
   var items = Array.isArray(rawItems) ? rawItems.slice(0, CART_CALC_MAX_ITEMS) : [];
-  var priceMap = getWholesalePrices();
+  var priceMap = getWholesalePricesCached();
   var out = [];
   var total = 0;
 
@@ -2266,6 +2414,10 @@ function saveProduct(data, isStaffRequest) {
     if (data.photo    !== undefined && iPhoto >= 0) sheet.getRange(rowNum, iPhoto + 1).setValue(trimToLength(String(data.photo), 300));
     if (visibleValue  !== undefined && iVis   >= 0) sheet.getRange(rowNum, iVis   + 1).setValue(visibleValue);
   }
+
+  // A price or name change should reach the customer's menu straight away,
+  // not whenever the cache happens to expire.
+  invalidateProductCache();
 
   return { success: true, code: code };
 }

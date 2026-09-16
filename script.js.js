@@ -31,7 +31,6 @@ let CURRENT_SEARCH = "";
 let CURRENT_ORDER_REF = null;
 let LAST_PRICING = { total: 0, byKey: {} }; // key -> {unitPrice, lineTotal}
 let pricingDebounceHandle = null;
-let searchDebounceHandle = null;
 
 /* ---------- DOM ---------- */
 const searchInput = document.getElementById("searchInput");
@@ -76,19 +75,106 @@ function cartQtyTotal() {
   return total;
 }
 
-/* ---------- load products ---------- */
-async function loadProducts() {
-  productList.innerHTML = `<div class="no-results">Loading products…</div>`;
-  const result = await getFromGoogleApi({ action: "getproducts" });
-  if (!result || result.success !== true || !Array.isArray(result.products)) {
-    productList.innerHTML = `<div class="no-results">Could not load the menu. Please refresh the page, or check your connection.</div>`;
-    listCount.textContent = "";
-    return;
+/* ---------- load products ----------
+
+   The menu used to appear only after a round trip to Google — every visit,
+   every time. Now the last known menu is kept in this browser and shown
+   immediately, while a fresh copy is fetched in the background and swapped
+   in only if something actually changed.
+
+   ONE RULE MATTERS MORE THAN THE SPEED: a staff browser must never write
+   this cache. Staff receive wholesale prices in their copy of the product
+   list. Saving that to disk would leave the entire price list sitting in a
+   shared laptop, outliving the staff session, ready to be rendered to
+   whoever opens the page next. Hence the getStaffToken() guard on both the
+   read and the write. */
+const PRODUCT_CACHE_KEY = "pwdf.products.v1";
+const PRODUCT_CACHE_SCHEMA = 1;              // bump when the row markup changes
+const PRODUCT_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+let PRODUCTS_SIGNATURE = "";                 // the last payload we rendered
+let PENDING_PRODUCTS = null;                 // fresh data held back mid-typing
+
+function readCachedProducts() {
+  if (getStaffToken()) return null;          // never serve a staff-priced cache
+  try {
+    const box = JSON.parse(localStorage.getItem(PRODUCT_CACHE_KEY) || "null");
+    if (!box || box.v !== PRODUCT_CACHE_SCHEMA) return null;
+    if (!Array.isArray(box.products) || !box.products.length) return null;
+    if (Date.now() - Number(box.savedAt || 0) > PRODUCT_CACHE_MAX_AGE_MS) return null;
+    // Belt and braces: if a price ever appears in here, distrust the whole thing.
+    if (box.products.some(p => p && "price" in p)) return null;
+    return box.products;
+  } catch (err) {
+    return null;                             // private mode, cleared storage, anything
   }
-  ALL_PRODUCTS = result.products;
+}
+
+function writeCachedProducts(products) {
+  if (getStaffToken()) return;               // never persist wholesale prices
+  try {
+    localStorage.setItem(PRODUCT_CACHE_KEY, JSON.stringify({
+      v: PRODUCT_CACHE_SCHEMA, savedAt: Date.now(), products: products
+    }));
+  } catch (err) {
+    /* storage full or unavailable — the cache is an optimisation, not a need */
+  }
+}
+
+/* Applies fresh data that was held back because the customer was typing. */
+function drainPendingProducts() {
+  if (!PENDING_PRODUCTS) return;
+  const list = PENDING_PRODUCTS;
+  PENDING_PRODUCTS = null;
+  applyProducts(list);
+}
+
+function applyProducts(products) {
+  ALL_PRODUCTS = products;
+  // Stamp each product with its position so a row can point back at it.
+  ALL_PRODUCTS.forEach((p, i) => { p._i = i; });
   buildCategoryList();
   renderCategoryUI();
   renderProductList();
+}
+
+async function loadProducts() {
+  if (!productList) return;                  // not the ordering page
+
+  const cached = readCachedProducts();
+  let showing = false;
+  if (cached) {
+    applyProducts(cached);
+    showing = true;
+  } else {
+    productList.innerHTML = `<div class="no-results">Loading products…</div>`;
+  }
+
+  const result = await getFromGoogleApi({ action: "getproducts" });
+  if (!result || result.success !== true || !Array.isArray(result.products)) {
+    // If a cached menu is already on screen, leave it there — a customer with
+    // a patchy connection can still order from yesterday's menu.
+    if (!showing) {
+      productList.innerHTML = `<div class="no-results">Could not load the menu. Please refresh the page, or check your connection.</div>`;
+      if (listCount) listCount.textContent = "";
+    }
+    return;
+  }
+
+  // Compare and store BEFORE applyProducts stamps _i onto each product,
+  // otherwise every refresh would look like a change.
+  const signature = JSON.stringify(result.products);
+  writeCachedProducts(result.products);
+  if (showing && signature === PRODUCTS_SIGNATURE) return;   // nothing changed
+  PRODUCTS_SIGNATURE = signature;
+
+  // Don't rebuild the list out from under someone who is mid-interaction;
+  // hold it until they next search or change category.
+  if (showing && productList.contains(document.activeElement)) {
+    PENDING_PRODUCTS = result.products;
+    return;
+  }
+  applyProducts(result.products);
 }
 
 function buildCategoryList() {
@@ -111,19 +197,24 @@ function renderCategoryUI() {
   CATEGORY_LIST.forEach(c => {
     railHtml += `<div class="cat-row ${CURRENT_CATEGORY === c.name ? "active" : ""}" data-cat="${escapeHtml(c.name)}"><span>${escapeHtml(titleCase(c.name))}</span><span class="cat-count">${c.count}</span></div>`;
   });
-  categoryRail.innerHTML = railHtml;
-  categoryRail.querySelectorAll("[data-cat]").forEach(el => {
-    el.addEventListener("click", () => setCategory(el.dataset.cat));
-  });
+  // Both containers are optional — the order editor has a strip but no rail.
+  if (categoryRail) {
+    categoryRail.innerHTML = railHtml;
+    categoryRail.querySelectorAll("[data-cat]").forEach(el => {
+      el.addEventListener("click", () => setCategory(el.dataset.cat));
+    });
+  }
 
   let stripHtml = `<div class="cat-chip ${CURRENT_CATEGORY === "" ? "active" : ""}" data-cat="">All (${totalCount})</div>`;
   CATEGORY_LIST.forEach(c => {
     stripHtml += `<div class="cat-chip ${CURRENT_CATEGORY === c.name ? "active" : ""}" data-cat="${escapeHtml(c.name)}">${escapeHtml(titleCase(c.name))} (${c.count})</div>`;
   });
-  categoryStrip.innerHTML = stripHtml;
-  categoryStrip.querySelectorAll("[data-cat]").forEach(el => {
-    el.addEventListener("click", () => setCategory(el.dataset.cat));
-  });
+  if (categoryStrip) {
+    categoryStrip.innerHTML = stripHtml;
+    categoryStrip.querySelectorAll("[data-cat]").forEach(el => {
+      el.addEventListener("click", () => setCategory(el.dataset.cat));
+    });
+  }
 }
 
 function titleCase(s) {
@@ -136,6 +227,7 @@ function escapeHtml(s) {
 
 function setCategory(cat) {
   CURRENT_CATEGORY = cat || "";
+  drainPendingProducts();
   renderCategoryUI();
   renderProductList();
 }
@@ -153,36 +245,28 @@ function getFilteredProducts() {
   });
 }
 
-function renderProductList() {
-  const filtered = getFilteredProducts();
-  listTitle.textContent = CURRENT_CATEGORY ? titleCase(CURRENT_CATEGORY) : "All products";
-  listCount.textContent = `${filtered.length} item${filtered.length === 1 ? "" : "s"}`;
+/* Builds one row's markup as a string.
+   Every row carries two identifying attributes:
+     data-idx  — where this product sits in ALL_PRODUCTS, so a click can find
+                 it again without hunting through the array.
+     data-code — the same product's code, checked on every click. If the
+                 catalogue is swapped out by a background refresh between a
+                 render and a tap, the codes won't line up and the tap is
+                 ignored rather than quietly adding the wrong product. */
+function productRowHtml(p) {
+  const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
+  const initialChoice = choices.length ? choices[0] : "";
+  const line = CART.get(cartKey(p.code, initialChoice));
+  const qty = line ? line.qty : 0;
 
-  if (!filtered.length) {
-    productList.innerHTML = `<div class="no-results">No products found. Try another search term.</div>`;
-    return;
-  }
+  // Only ever request a photo that is a real web address (the ones uploaded
+  // via the staff portal's Drive photo tool). Older leftover values in the
+  // sheet like "MASTER_LIST_PHOTO/DP-C0008.JPG" are local filenames from the
+  // old system, not real links — requesting hundreds of those at once is
+  // what was making the whole page look stuck on "Loading".
+  const hasRealPhoto = /^https?:\/\//i.test(p.photo || "");
 
-  // Build every row off-screen and insert them all in one go — appending
-  // each row straight into productList one at a time forces the browser to
-  // reflow the page after every single item, which is what made a long
-  // list (or a search retyped fast) feel sluggish to render.
-  const fragment = document.createDocumentFragment();
-  filtered.forEach(p => {
-    const row = document.createElement("div");
-    row.className = "product-row";
-
-    const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
-    const initialChoice = choices.length ? choices[0] : "";
-
-    // Only ever request a photo that is a real web address (the ones uploaded
-    // via the staff portal's Drive photo tool). Older leftover values in the
-    // sheet like "MASTER_LIST_PHOTO/DP-C0008.JPG" are local filenames from the
-    // old system, not real links — requesting hundreds of those at once is
-    // what was making the whole page look stuck on "Loading".
-    const hasRealPhoto = /^https?:\/\//i.test(p.photo || "");
-
-    row.innerHTML = `
+  return `<div class="product-row${qty > 0 ? " has-qty" : ""}" data-idx="${p._i}" data-code="${escapeHtml(p.code)}">
       ${hasRealPhoto
         ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;product-thumb placeholder&quot;>no photo</div>'">`
         : `<div class="product-thumb placeholder">no photo</div>`}
@@ -192,56 +276,82 @@ function renderProductList() {
       </div>
       <div class="opt-and-stepper">
         ${choices.length
-          ? `<select class="opt-select">${choices.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>`
+          ? `<select class="opt-select" data-act="choice">${choices.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>`
           : `<span class="no-opt">—</span>`}
         <div class="stepper">
-          <button type="button" class="minus">–</button>
-          <input type="number" class="qty-val" min="0" value="0" inputmode="numeric">
-          <button type="button" class="plus">+</button>
+          <button type="button" class="minus" data-act="minus">–</button>
+          <input type="number" class="qty-val" data-act="qty" min="0" value="${qty}" inputmode="numeric">
+          <button type="button" class="plus" data-act="plus">+</button>
         </div>
       </div>
-    `;
+    </div>`;
+}
 
-    const optSelect = row.querySelector(".opt-select");
-    const qtyInput = row.querySelector(".qty-val");
-    const minusBtn = row.querySelector(".minus");
-    const plusBtn = row.querySelector(".plus");
+function renderProductList() {
+  if (!productList) return;
+  const filtered = getFilteredProducts();
+  if (listTitle) listTitle.textContent = CURRENT_CATEGORY ? titleCase(CURRENT_CATEGORY) : "All products";
+  if (listCount) listCount.textContent = `${filtered.length} item${filtered.length === 1 ? "" : "s"}`;
 
-    function currentChoice() {
-      return optSelect ? optSelect.value : "";
-    }
+  if (!filtered.length) {
+    productList.innerHTML = `<div class="no-results">No products found. Try another search term.</div>`;
+    return;
+  }
 
-    function syncQtyDisplay() {
-      const line = CART.get(cartKey(p.code, currentChoice()));
-      const qty = line ? line.qty : 0;
-      qtyInput.value = qty;
-      row.classList.toggle("has-qty", qty > 0);
-    }
+  // One string, one parse, one layout — instead of building 341 elements and
+  // appending them into the live page one at a time. Quantities are baked
+  // into the markup, so there's no second pass to sync the steppers either.
+  productList.innerHTML = filtered.map(productRowHtml).join("");
+}
 
-    function applyQty(newQty) {
-      newQty = Math.max(0, Math.floor(Number(newQty) || 0));
-      setCartQty(p, currentChoice(), newQty);
-      syncQtyDisplay();
-    }
+/* ---------- product row interactions ----------
+   Two listeners on the container handle every row, instead of four listeners
+   per row (about 1,360 of them for the full catalogue). Because the container
+   itself is never replaced, these survive every re-render and never need
+   re-attaching. */
+function rowContext(target) {
+  const row = target.closest(".product-row");
+  if (!row) return null;
+  const p = ALL_PRODUCTS[Number(row.dataset.idx)];
+  // The code check is the guard against a stale row: if the catalogue changed
+  // underneath us, do nothing rather than act on the wrong product.
+  if (!p || String(p.code) !== row.dataset.code) return null;
+  const select = row.querySelector(".opt-select");
+  return { row: row, product: p, choice: select ? select.value : "" };
+}
 
-    minusBtn.addEventListener("click", () => {
-      const line = CART.get(cartKey(p.code, currentChoice()));
-      applyQty((line ? line.qty : 0) - 1);
-    });
-    plusBtn.addEventListener("click", () => {
-      const line = CART.get(cartKey(p.code, currentChoice()));
-      applyQty((line ? line.qty : 0) + 1);
-    });
-    qtyInput.addEventListener("change", () => applyQty(qtyInput.value));
-    if (optSelect) {
-      optSelect.addEventListener("change", syncQtyDisplay);
-    }
+function syncRowQty(ctx) {
+  const line = CART.get(cartKey(ctx.product.code, ctx.choice));
+  const qty = line ? line.qty : 0;
+  const input = ctx.row.querySelector(".qty-val");
+  if (input) input.value = qty;
+  ctx.row.classList.toggle("has-qty", qty > 0);
+}
 
-    syncQtyDisplay();
-    fragment.appendChild(row);
-  });
-  productList.innerHTML = "";
-  productList.appendChild(fragment);
+function applyRowQty(ctx, newQty) {
+  // Deliberately routed through setCartQty so the decoration surcharge
+  // prompt and the pricing refresh keep working exactly as before.
+  setCartQty(ctx.product, ctx.choice, Math.max(0, Math.floor(Number(newQty) || 0)));
+  syncRowQty(ctx);
+}
+
+function onProductListClick(e) {
+  const button = e.target.closest("button[data-act]");
+  if (!button) return;
+  const ctx = rowContext(button);
+  if (!ctx) return;
+  const line = CART.get(cartKey(ctx.product.code, ctx.choice));
+  const current = line ? line.qty : 0;
+  applyRowQty(ctx, button.dataset.act === "plus" ? current + 1 : current - 1);
+}
+
+function onProductListChange(e) {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const ctx = rowContext(el);
+  if (!ctx) return;
+  if (el.dataset.act === "qty") applyRowQty(ctx, el.value);
+  else if (el.dataset.act === "choice") syncRowQty(ctx);
 }
 
 /* ---------- cart ---------- */
@@ -326,13 +436,20 @@ function buildCartItemsPayload() {
   return { keys, items };
 }
 
+/* Counts pricing requests so a slow earlier one can't land after a newer
+   one and overwrite the total with a figure for a cart the customer has
+   since changed. */
+let pricingSeq = 0;
+
 async function fetchCartPricing() {
   const { keys, items } = buildCartItemsPayload();
   if (!items.length) {
     LAST_PRICING = { total: 0, byKey: {} };
     return LAST_PRICING;
   }
+  const seq = ++pricingSeq;
   const result = await postToGoogleApi({ action: "calculatecart", items });
+  if (seq !== pricingSeq) return LAST_PRICING;   // superseded while in flight
   if (!result || result.success !== true || !Array.isArray(result.items)) {
     return LAST_PRICING; // keep the last known-good figures rather than showing something broken
   }
@@ -348,9 +465,28 @@ async function fetchCartPricing() {
 function schedulePricingRefresh() {
   if (pricingDebounceHandle) clearTimeout(pricingDebounceHandle);
   pricingDebounceHandle = setTimeout(async () => {
+    pricingDebounceHandle = null;
     await fetchCartPricing();
     renderOrderPanel();
   }, 350);
+}
+
+/* Price it now, cancelling any refresh that was already queued — otherwise
+   the queued one fires moments later and asks the server the same question
+   twice for one action. */
+async function flushPricingRefresh() {
+  if (pricingDebounceHandle) {
+    clearTimeout(pricingDebounceHandle);
+    pricingDebounceHandle = null;
+  }
+  await fetchCartPricing();
+  renderOrderPanel();
+}
+
+/* Only price if something is actually outstanding. Used at submit time,
+   where the review popup has almost always priced the cart already. */
+async function ensurePricingCurrent() {
+  if (pricingDebounceHandle) await flushPricingRefresh();
 }
 
 /* ---------- review / submit popup ---------- */
@@ -362,7 +498,7 @@ async function openOrderReview() {
   CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
   reviewBtnDesktop.disabled = true;
   reviewBtnMobile.disabled = true;
-  await fetchCartPricing(); // get an accurate figure right before showing it
+  await flushPricingRefresh(); // accurate figure now, and cancels the queued one
   reviewBtnDesktop.disabled = false;
   reviewBtnMobile.disabled = false;
   renderPopupCart();
@@ -405,13 +541,15 @@ function renderPopupCart() {
       const qty = Math.max(1, Math.floor(Number(e.target.value) || 1));
       line.qty = qty;
       refreshCartUI();
-      await fetchCartPricing();
+      await flushPricingRefresh();
       renderPopupCart();
       renderProductList();
     });
     el.querySelector(".remove-line-btn").addEventListener("click", async () => {
       removeCartLine(key);
-      await fetchCartPricing();
+      // removeCartLine queues its own refresh; flushing runs it once instead
+      // of letting the queued one fire a second identical request.
+      await flushPricingRefresh();
       renderPopupCart();
     });
   });
@@ -481,7 +619,7 @@ async function saveOrderToGoogleSheet() {
 }
 
 async function submitEmail() {
-  await fetchCartPricing();
+  await ensurePricingCurrent();
   const t = buildText();
   if (!t) return;
   try {
@@ -496,7 +634,7 @@ async function submitEmail() {
 }
 
 async function submitWhatsApp() {
-  await fetchCartPricing();
+  await ensurePricingCurrent();
   const t = buildText();
   if (!t) return;
 
@@ -513,15 +651,25 @@ async function submitWhatsApp() {
 }
 
 /* ---------- wire up ---------- */
+if (productList) {
+  // Registered once, for the life of the page. See rowContext() above.
+  productList.addEventListener("click", onProductListClick);
+  productList.addEventListener("change", onProductListChange);
+}
+
 if (searchInput) {
-  // Debounced: renderProductList() rebuilds the whole list, so re-running it
-  // on every single keystroke made fast typing feel laggy. Waiting for a
-  // short pause before re-rendering keeps the input itself instant while
-  // still updating the list almost immediately after typing stops.
+  // Typing used to rebuild the entire list on every keystroke. Waiting for a
+  // short pause means one rebuild per word rather than one per letter, which
+  // is the difference between smooth and sticky on a phone.
+  let searchDebounceHandle = null;
   searchInput.addEventListener("input", (e) => {
-    CURRENT_SEARCH = e.target.value;
+    const typed = e.target.value;
     if (searchDebounceHandle) clearTimeout(searchDebounceHandle);
-    searchDebounceHandle = setTimeout(renderProductList, 150);
+    searchDebounceHandle = setTimeout(() => {
+      CURRENT_SEARCH = typed;
+      drainPendingProducts();
+      renderProductList();
+    }, 180);
   });
 }
 if (reviewBtnDesktop) reviewBtnDesktop.addEventListener("click", openOrderReview);
