@@ -77,7 +77,8 @@ const HEADER_COLUMNS = [
   "Status",
   "ItemCount",
   "OpSentDate",
-  "DeliveryArea"
+  "DeliveryArea",
+  "Notes"
 ];
 
 // Column position (1-based) of OpSentDate — blank means "not yet sent to
@@ -87,6 +88,13 @@ const OP_SENT_COLUMN = 9;
 // Column position (1-based) of DeliveryArea — the human-readable
 // "State - Area" label for which delivery-day group the order belongs to.
 const DELIVERY_AREA_COLUMN = 10;
+
+// Free-text remarks typed by whoever raised the order — a customer's special
+// instruction, a PO reference, "ring the back gate". Previously the Edit page
+// collected this and then silently threw it away, because there was nowhere
+// in ORDER_HEADER to put it. It now has a home, and it is printed on the
+// Operations email, which is the whole point of writing a remark.
+const NOTES_COLUMN = 11;
 
 const DETAIL_COLUMNS = ["OrderRef", "Code", "Name", "Remark", "Qty"];
 
@@ -258,6 +266,7 @@ function sanitizePublicOrder(data) {
     contact: trimToLength(data.contact, PUBLIC_MAX_TEXT_LENGTH),
     deliveryDate: "",
     deliveryArea: "",
+    notes: trimToLength(data.notes, PUBLIC_MAX_TEXT_LENGTH),
     status: "Draft", // public submissions are always drafts
     items: items.map(item => ({
       code: trimToLength(item.code, 60),
@@ -1134,6 +1143,7 @@ function saveOrderObject(rawData, isStaffRequest) {
     header.getRange(foundRow, 7).setValue(status);
     header.getRange(foundRow, 8).setValue(items.length);
     header.getRange(foundRow, DELIVERY_AREA_COLUMN).setValue(data.deliveryArea || "");
+    header.getRange(foundRow, NOTES_COLUMN).setValue(data.notes || "");
 
     clearOrderDetailRows(detail, orderRef);
   } else {
@@ -1147,7 +1157,8 @@ function saveOrderObject(rawData, isStaffRequest) {
       status,
       items.length,
       "", // OpSentDate — blank until staff explicitly marks it sent to Operations
-      data.deliveryArea || ""
+      data.deliveryArea || "",
+      data.notes || ""
     ]);
   }
 
@@ -1291,7 +1302,8 @@ function updateOrder(orderRef, updates, prefetchedOrder) {
     contact: 4,
     deliveryDate: 6,
     status: 7,
-    deliveryArea: DELIVERY_AREA_COLUMN
+    deliveryArea: DELIVERY_AREA_COLUMN,
+    notes: NOTES_COLUMN
   };
 
   Object.keys(updates).forEach(key => {
@@ -1652,6 +1664,9 @@ function notifySalesOfNewOrder(orderRef) {
   if (isUnlistedAreaOrder(order)) {
     body += `\n⚠ This customer's area was NOT in our delivery schedule — please confirm the exact delivery day with them directly.\n`;
   }
+  if (String(order.notes || "").trim()) {
+    body += `\nREMARKS:\n${order.notes}\n`;
+  }
   body += `\nITEMS:\n`;
   (order.items || []).forEach(item => {
     body += `${item.qty || 0} x ${item.name || item.code || "-"}${item.remark ? " (" + item.remark + ")" : ""}\n`;
@@ -1685,6 +1700,11 @@ function notifyOperationsOfOrder(orderRef, prefetchedOrder) {
   let body = `ORDER FOR OPERATIONS\n\nOrder Ref: ${order.orderRef}\nCustomer: ${order.customer || "-"}\nCompany: ${order.company || "-"}\nContact: ${order.contact || "-"}\nDelivery Date: ${order.deliveryDate || "-"}\nDelivery Area: ${order.deliveryArea || "-"}\n`;
   if (isUnlistedAreaOrder(order)) {
     body += `\n⚠ This customer's area was NOT in our delivery schedule — please confirm the exact delivery day with them directly before dispatch.\n`;
+  }
+  // A remark exists to be acted on, and Operations are the ones who act.
+  // Printed above the items so it is read before anything is prepared.
+  if (String(order.notes || "").trim()) {
+    body += `\nREMARKS:\n${order.notes}\n`;
   }
   body += `\nITEMS:\n`;
   (order.items || []).forEach(item => {
@@ -1723,6 +1743,7 @@ function searchOrders(query) {
     opSentDate: row[8] ? formatSheetDate(row[8]) : "",
     sentToOp: !!row[8],
     deliveryArea: row[9] || "",
+    notes: row[10] || "",
     rowValues: row.map(cell => String(cell || "").toLowerCase())
   }));
 
@@ -1845,6 +1866,7 @@ function fetchOrder(orderRef) {
     opSentDate: orderRow[8] ? formatSheetDate(orderRow[8]) : "",
     sentToOp: !!orderRow[8],
     deliveryArea: orderRow[9] || "",
+    notes: orderRow[10] || "",
     items: items
   };
 }
@@ -1869,6 +1891,7 @@ function orderFromHeaderRow(row, index) {
     opSentDate: row[8] ? formatSheetDate(row[8]) : "",
     sentToOp: !!row[8],
     deliveryArea: row[9] || "",
+    notes: row[10] || "",
     _sheetRow: index
   };
 }

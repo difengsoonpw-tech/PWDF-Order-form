@@ -109,41 +109,85 @@ function parseOrderCart(order) {
   return cart;
 }
 
-async function saveDraftOrder() {
-  if (!existingOrder) return;
-  const payload = buildOrderPayload({
+/* Both buttons send the same thing; only the status differs. */
+function buildPayloadWithStatus(status) {
+  const values = getOrderInputValues();
+  return buildOrderPayload({
     orderRef: existingOrder.orderRef || existingOrder.OrderRef,
-    customer: getOrderInputValues().customer,
-    company: getOrderInputValues().company,
-    contact: getOrderInputValues().contact,
-    deliveryDate: getOrderInputValues().deliveryDate,
-    status: existingOrder.status || existingOrder.Status || "Draft",
-    notes: getOrderInputValues().notes,
+    customer: values.customer,
+    company: values.company,
+    contact: values.contact,
+    deliveryDate: values.deliveryDate,
+    status: status,
+    notes: values.notes,
     cart: CART,
     createdDate: existingOrder.createdDate || existingOrder.CreatedDate,
     updatedDate: new Date().toISOString()
   });
-  await saveOrderPayload(payload);
+}
+
+async function saveDraftOrder() {
+  if (!existingOrder) return;
+  const payload = buildPayloadWithStatus(existingOrder.status || existingOrder.Status || "Draft");
+  const result = await saveOrderPayload(payload);
+  if (!result || result.success === false) {
+    alert("Couldn't save the draft.\n" + ((result && result.error) || "Please check your connection and try again."));
+    return;
+  }
   alert("Draft saved.");
 }
 
+/* Confirming used to write the status straight to the sheet and stop there,
+   which meant Operations were never told — the order looked Confirmed to
+   Sales and did not exist as far as the kitchen was concerned.
+
+   It now goes through updateOrder, which is the one place that emails
+   Operations when an order becomes Confirmed. That function also checks the
+   OpSentDate column first, so amending an already-sent order re-saves it
+   without sending Operations a second copy of the same order. */
 async function confirmOrderEdit() {
   if (!existingOrder) return;
-  const payload = buildOrderPayload({
-    orderRef: existingOrder.orderRef || existingOrder.OrderRef,
-    customer: getOrderInputValues().customer,
-    company: getOrderInputValues().company,
-    contact: getOrderInputValues().contact,
-    deliveryDate: getOrderInputValues().deliveryDate,
+
+  const values = getOrderInputValues();
+  // Operations schedule production by the delivery date. Confirming without
+  // one sends them an order that reads "Delivery Date: -", which is worse
+  // than not sending it at all.
+  if (!values.deliveryDate) {
+    alert("Please set a delivery date before confirming.\n\nOperations plan production from this date, so the order can't be sent to them without it.");
+    return;
+  }
+
+  const orderRef = existingOrder.orderRef || existingOrder.OrderRef;
+  const saved = await saveOrderPayload(buildPayloadWithStatus("Confirmed"));
+  if (!saved || saved.success === false) {
+    alert("Couldn't save the order, so nothing was confirmed.\n" + ((saved && saved.error) || "Please check your connection and try again."));
+    return;
+  }
+
+  const confirmed = await updateOrderPayload(orderRef, {
     status: "Confirmed",
-    notes: getOrderInputValues().notes,
-    cart: CART,
-    createdDate: existingOrder.createdDate || existingOrder.CreatedDate,
-    updatedDate: new Date().toISOString()
+    deliveryDate: values.deliveryDate
   });
-  await saveOrderPayload(payload);
-  await triggerMakeWebhook({ event: "order.confirmed", orderRef: payload.orderRef });
-  alert("Order confirmed.");
+
+  if (!confirmed || confirmed.success === false) {
+    alert("The order was saved, but confirming it failed, so Operations have NOT been told.\n" +
+          ((confirmed && confirmed.error) || "Please try Confirm again."));
+    return;
+  }
+
+  // Say plainly whether the warehouse actually heard about it. A silent
+  // "Order confirmed." that didn't send is how an order gets missed.
+  const notify = confirmed.opNotify;
+  if (notify && notify.sent) {
+    alert("Order confirmed.\nOperations have been emailed.");
+  } else if (notify && notify.sent === false) {
+    alert("Order confirmed, but the email to Operations did not send.\n(" +
+          (notify.reason || "unknown reason") +
+          ")\n\nPlease tell Operations yourself, or use 'Copy & mark sent' on the dashboard.");
+  } else {
+    // updateOrder returns no opNotify when OpSentDate was already stamped.
+    alert("Order confirmed.\nOperations had already been sent this order, so no second email was sent.");
+  }
   window.location.href = "staff.html";
 }
 
