@@ -82,6 +82,8 @@ a { color: inherit; }
   border-radius: 999px;
   white-space: nowrap;
 }
+.new-cust-link { border-color: var(--gold); color: var(--gold); }
+@media (max-width: 640px) { .new-cust-link { display: none; } }
 .cart-pill {
   display: none;
   align-items: center;
@@ -304,6 +306,7 @@ a { color: inherit; }
     <input id="searchInput" placeholder="Search name or code…">
   </div>
   <div class="topbar-right">
+    <a href="welcome.html" class="staff-link new-cust-link">New customer?</a>
     <a href="staff.html" class="staff-link">Staff Mode</a>
   </div>
 </header>

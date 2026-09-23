@@ -943,6 +943,14 @@ function doGet(e) {
     return jsonResponse({ success: true, message: "PWDF API ONLINE" });
   }
 
+  // Public — the new-customer page (welcome.html) asks this before sending
+  // a lead. An older copy of this script doesn't know the action and says
+  // "unauthorized", so the page never sends a lead that could be mistaken
+  // for an order.
+  if (action === "leadformready") {
+    return jsonResponse({ success: true, leads: true });
+  }
+
   // Lets the staff login screen check a password without exposing anything.
   if (action === "verifytoken") {
     return jsonResponse({ success: callerIsStaff(e, null) });
@@ -1090,6 +1098,12 @@ function doPost(e) {
     // and get back a price only for those, never the full price list.
     if (action === "calculatecart") {
       return jsonResponse(calculateCartTotal(data.items || []));
+    }
+
+    // Public — a new-customer enquiry from welcome.html. Must stay ABOVE the
+    // fall-through below, which treats anything unrecognised as an order.
+    if (action === "savelead") {
+      return jsonResponse(saveWebLead(data.lead || {}));
     }
 
     const order = data.order || data;
@@ -2611,4 +2625,231 @@ function doOptions(e) {
     // ignore
   }
   return output;
+}
+
+/*****************************************************
+ * NEW-CUSTOMER LEADS  (from welcome.html — public, no login)
+ *
+ * Every enquiry is written to two places:
+ *   1. WEB_LEADS   — a plain log of every form sent. Created automatically
+ *                    the first time. Nothing else ever edits it, so it is
+ *                    the permanent record.
+ *   2. WA-CONTACT  — your follow-up list (the tab whose name contains
+ *                    "WA-CONTACT"). The lead is added as a new LEAD-xxxxx
+ *                    row with Follow-up Status "First Contact Needed", so it
+ *                    shows up on the WhatsApp follow-up dashboard.
+ *                    If that WhatsApp number is already on the list, no
+ *                    duplicate is added — the enquiry is noted on the
+ *                    existing row instead.
+ *
+ * If SALES_EMAIL is set (it already is if you get new-order emails), you
+ * also get an email for each new lead.
+ *****************************************************/
+const SHEET_WEB_LEADS = "WEB_LEADS";
+const WEB_LEADS_HEADER = [
+  "Submitted At", "Lead ID", "Name", "Business", "WhatsApp", "Business Type",
+  "Area", "Interested In", "Message", "Source", "Result"
+];
+
+function saveWebLead(raw) {
+  raw = raw || {};
+
+  // Spam trap: the form has a hidden "website" box people never see.
+  // Only bots fill it in. Pretend it worked and store nothing.
+  if (String(raw.website || "").trim()) {
+    return { success: true };
+  }
+
+  const lead = {
+    name: cleanLeadText(raw.name, 80),
+    business: cleanLeadText(raw.business, 120),
+    phone: normalizeLeadPhone(raw.phone),
+    type: cleanLeadText(raw.type, 40),
+    area: cleanLeadText(raw.area, 80),
+    interests: (Array.isArray(raw.interests) ? raw.interests : [])
+      .map(i => cleanLeadText(i, 40)).filter(String).slice(0, 12).join(", "),
+    message: cleanLeadText(raw.message, 500),
+    source: cleanLeadText(raw.source, 40) || "website"
+  };
+
+  if (!lead.name) throw new Error("Please enter your name.");
+  if (!lead.phone) throw new Error("Please enter a valid WhatsApp number, e.g. 012-345 6789.");
+  if (!lead.business) throw new Error("Please enter your business name.");
+
+  // Someone double-tapping Send, or a bot hammering the form: one enquiry
+  // per number every 10 minutes, and at most 60 an hour in total.
+  const cache = CacheService.getScriptCache();
+  const phoneKey = "lead_phone_" + lead.phone;
+  if (cache.get(phoneKey)) return { success: true, repeat: true };
+  const hourKey = "lead_hour_" + Utilities.formatDate(new Date(), "UTC", "yyyyMMddHH");
+  const hourCount = Number(cache.get(hourKey) || 0);
+  if (hourCount >= 60) throw new Error("We're receiving a lot of enquiries right now — please WhatsApp us instead.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  let result;
+  try {
+    result = addLeadToContactList(lead);
+    const log = getSheetOrCreate(SHEET_WEB_LEADS, WEB_LEADS_HEADER);
+    log.appendRow([
+      new Date(), result.id || "", lead.name, lead.business, lead.phone, lead.type,
+      lead.area, lead.interests, lead.message, lead.source, result.note
+    ].map(safeCellValue));
+  } finally {
+    lock.releaseLock();
+  }
+
+  cache.put(phoneKey, "1", 600);
+  cache.put(hourKey, String(hourCount + 1), 3700);
+
+  Logger.log("New website lead: %s", JSON.stringify(notifySalesOfNewLead(lead, result)));
+  return { success: true };
+}
+
+/**
+ * Adds the lead to the WA-CONTACT tab, matching its columns by their
+ * header names (so it keeps working if columns are moved around).
+ * Returns { id, note } describing what happened.
+ */
+function addLeadToContactList(lead) {
+  const sheet = findWaContactSheet();
+  if (!sheet) return { id: "", note: "Logged only — no WA-CONTACT tab found" };
+
+  const values = sheet.getDataRange().getValues();
+  let headerIdx = -1;
+  for (let r = 0; r < Math.min(values.length, 10); r++) {
+    if (values[r].some(v => normalizeHeaderValue(v) === "customerid")) { headerIdx = r; break; }
+  }
+  if (headerIdx < 0) return { id: "", note: "Logged only — WA-CONTACT has no 'Customer ID' header" };
+
+  const header = values[headerIdx].map(normalizeHeaderValue);
+  const col = name => header.indexOf(normalizeHeaderValue(name));
+  const cId = col("Customer ID"), cPhone = col("WhatsApp"), cNotes = col("Notes");
+
+  // Already on the list? Don't add a second row — note the enquiry instead.
+  if (cPhone >= 0) {
+    for (let r = headerIdx + 1; r < values.length; r++) {
+      if (normalizeLeadPhone(values[r][cPhone]) === lead.phone) {
+        const existingId = String(values[r][cId] || "");
+        if (cNotes >= 0) {
+          const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+          const old = String(values[r][cNotes] || "");
+          const add = "Website enquiry " + stamp + (lead.interests ? " (" + lead.interests + ")" : "");
+          sheet.getRange(r + 1, cNotes + 1).setValue(safeCellValue(old ? old + " | " + add : add));
+        }
+        const cStatus = col("Follow-up Status");
+        const cNext = col("Next Follow-up Date");
+        if (cNext >= 0) sheet.getRange(r + 1, cNext + 1).setValue(todayString());
+        if (cStatus >= 0) sheet.getRange(r + 1, cStatus + 1).setValue("Due");
+        return { id: existingId, note: "Already on WA-CONTACT as " + existingId + " — marked Due" };
+      }
+    }
+  }
+
+  // Next number continues from the highest existing CUS-/LEAD- number.
+  let maxNum = 0;
+  for (let r = headerIdx + 1; r < values.length; r++) {
+    const m = String(values[r][cId] || "").match(/(\d+)\s*$/);
+    if (m) maxNum = Math.max(maxNum, Number(m[1]));
+  }
+  const id = "LEAD-" + String(maxNum + 1).padStart(5, "0");
+
+  const noteParts = ["Website lead (" + lead.source + ")"];
+  if (lead.type) noteParts.push(lead.type);
+  if (lead.area) noteParts.push(lead.area);
+  if (lead.interests) noteParts.push("Interested in: " + lead.interests);
+  if (lead.message) noteParts.push("Msg: " + lead.message);
+
+  const row = new Array(header.length).fill("");
+  const set = (name, value) => { const i = col(name); if (i >= 0) row[i] = value; };
+  set("Customer ID", id);
+  set("Customer Name", lead.name);
+  set("Brand / Company", lead.business);
+  set("WhatsApp", lead.phone);
+  set("Customer Type", "New Lead");
+  set("Total Orders", 0);
+  set("Active Orders", 0);
+  set("Cancelled/Draft Orders", 0);
+  set("Customer Status", "New");
+  set("Next Follow-up Date", todayString());
+  set("Follow-up Status", "First Contact Needed");
+  set("Notes", noteParts.join(" · "));
+
+  const safeRow = row.map(safeCellValue);
+  const linkCol = col("WhatsApp Link");
+  if (linkCol >= 0) safeRow[linkCol] = '=HYPERLINK("https://wa.me/' + lead.phone + '","WhatsApp")';
+  sheet.appendRow(safeRow);
+  return { id: id, note: "Added to WA-CONTACT as " + id };
+}
+
+function findWaContactSheet() {
+  const sheets = getSpreadsheet().getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const n = sheets[i].getName().toUpperCase().replace(/[\s_]+/g, "-");
+    if (n.indexOf("WA-CONTACT") >= 0) return sheets[i];
+  }
+  return null;
+}
+
+function notifySalesOfNewLead(lead, result) {
+  const salesEmail = String(scriptProps().getProperty("SALES_EMAIL") || "").trim();
+  if (!salesEmail) return { sent: false, reason: "SALES_EMAIL not configured" };
+  const subject = "New website lead — " + (lead.business || lead.name) + (result.id ? " (" + result.id + ")" : "");
+  const body =
+    "Someone just left their details on the new-customer page.\n\n" +
+    "Name: " + lead.name + "\n" +
+    "Business: " + lead.business + (lead.type ? " (" + lead.type + ")" : "") + "\n" +
+    "WhatsApp: +" + lead.phone + "\n" +
+    (lead.area ? "Area: " + lead.area + "\n" : "") +
+    (lead.interests ? "Interested in: " + lead.interests + "\n" : "") +
+    (lead.message ? "Message: " + lead.message + "\n" : "") +
+    "Came from: " + lead.source + "\n\n" +
+    (result.note || "") + "\n\n" +
+    "Message them now: https://wa.me/" + lead.phone;
+  try {
+    return { sent: true, from: sendSystemEmail(salesEmail, subject, body, { orderRef: result.id || "", kind: "New lead" }) };
+  } catch (err) {
+    Logger.log("New-lead email FAILED: %s", err);
+    return { sent: false, reason: String(err) };
+  }
+}
+
+/** Malaysian-friendly: "012-345 6789" / "+60 12…" / "6012…" all become "6012…". */
+function normalizeLeadPhone(value) {
+  let d = String(value == null ? "" : value).replace(/\D/g, "");
+  if (!d) return "";
+  if (d.indexOf("0") === 0) d = "6" + d;             // 012… -> 6012…
+  else if (d.indexOf("1") === 0 && d.length <= 10) d = "60" + d; // 12… -> 6012…
+  return (d.length >= 10 && d.length <= 13) ? d : "";
+}
+
+function cleanLeadText(value, maxLen) {
+  return String(value == null ? "" : value)
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLen || 200);
+}
+
+/** Stops typed text like "=IMPORTXML(…)" from being run as a formula. */
+function safeCellValue(value) {
+  if (typeof value !== "string") return value;
+  return /^[=+\-@]/.test(value) ? "'" + value : value;
+}
+
+function todayString() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+/**
+ * Pick "testWebLead" in the function dropdown and click Run to check the
+ * whole thing end to end. It adds one clearly-named TEST lead — delete
+ * that row from WA-CONTACT and WEB_LEADS afterwards.
+ */
+function testWebLead() {
+  const r = saveWebLead({
+    name: "TEST — delete me", business: "Test Cafe", phone: "0100000000",
+    type: "Café", area: "Shah Alam", interests: ["Macarons"], message: "test", source: "test"
+  });
+  Logger.log(JSON.stringify(r));
 }
