@@ -88,3 +88,14 @@
    so its line names are clipped at 170px. On the Edit page the same panel is
    full width, where clipping just hides which product a line is. */
 .order-line .ol-name { max-width: none; }
+
+
+/* A product with options starts with nothing chosen, so the row says so.
+   Tapping + before choosing highlights it rather than silently booking the
+   first option (which is always "Uncut"). */
+.product-row.needs-choice .opt-select { border-color: var(--gold); color: var(--dark); font-weight: 700; }
+.product-row.nudge { outline: 2px solid var(--gold); outline-offset: 2px; }
+.product-row.nudge .opt-select { background: #FFF6DC; }
+@media (prefers-reduced-motion: no-preference) {
+  .product-row.nudge { transition: outline-color 120ms ease-in; }
+}

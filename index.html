@@ -188,6 +188,15 @@ a { color: inherit; }
 .stepper button.plus { background: var(--dark); color: var(--cream); }
 .stepper button:disabled { color: #C4B99C; cursor: default; }
 .stepper .qty-val { width: 32px; text-align: center; font-size: 14px; font-weight: 700; }
+/* A product with options starts with nothing chosen, so the row says so.
+   Tapping + before choosing highlights it rather than silently booking the
+   first option (which is always "Uncut"). */
+.product-row.needs-choice .opt-select { border-color: var(--gold); color: var(--dark); font-weight: 700; }
+.product-row.nudge { outline: 2px solid var(--gold); outline-offset: 2px; }
+.product-row.nudge .opt-select { background: #FFF6DC; }
+@media (prefers-reduced-motion: no-preference) {
+  .product-row.nudge { transition: outline-color 120ms ease-in; }
+}
 .no-results { padding: 30px; text-align: center; color: var(--muted2); background: var(--white); border-radius: 12px; border: 1px solid var(--cardline); }
 
 /* ---- order panel (desktop) ---- */
@@ -403,8 +412,8 @@ a { color: inherit; }
   </svg>
 </a>
 
-<script src="google.js?v=3"></script>
-<script src="order.js?v=3"></script>
-<script src="script.js.js?v=3"></script>
+<script src="google.js?v=4"></script>
+<script src="order.js?v=4"></script>
+<script src="script.js.js?v=4"></script>
 </body>
 </html>

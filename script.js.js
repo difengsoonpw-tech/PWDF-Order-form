@@ -81,6 +81,28 @@ const contactNumber = document.getElementById("contactNumber");
    about delivery areas is fetched here any more, which also means the
    customer list is no longer reachable from a customer's browser at all. */
 
+/* Trims the production markings out of a product name for the copy the
+   customer reads back, e.g.
+
+     10" ALMOND TIRAMISU CAKE *(h)6.5cm+/- UNIT 12   ->   10" ALMOND TIRAMISU CAKE
+
+   The height and the carton count mean nothing to the person checking their
+   own order, and they make a WhatsApp message twice as long as it needs to be.
+
+   The leading size is deliberately KEPT. Nine cakes exist as both an 8" and a
+   10" — ALMOND TIRAMISU, RED VELVET, FLOURLESS CHOCOLATE and the rest — so
+   dropping it would make two different products read identically, and the
+   only thing left telling them apart would be a product code no customer
+   reads. The full name is untouched everywhere else; this is only the
+   summary text. */
+function summaryName(name) {
+  return String(name || "")
+    .replace(/\*?\(\s*h\s*\)\s*[\d.]+\s*cm\s*\+?\/?-?/gi, " ")  // *(h)6.5cm+/-
+    .replace(/\bUNIT\s*\d+\b/gi, " ")                            // UNIT 12
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function formatMoney(n) {
   return "RM " + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -281,7 +303,13 @@ function productRowHtml(p) {
      "45 CUT" with a quantity of 0 the moment the list is re-rendered — on a
      search, a category change, or a background catalogue refresh — and on the
      staff Edit page a whole saved order looks empty. */
-  let selectedChoice = choices.length ? choices[0] : "";
+  /* Starts EMPTY for a product with options, not on the first one.
+
+     Every option list in the sheet begins with "Uncut", so defaulting to the
+     first entry meant tapping + quietly booked an uncut cake. The customer
+     never made that choice — they just didn't touch a dropdown they had no
+     reason to think mattered — and found out when the delivery arrived. */
+  let selectedChoice = "";
   let qty = 0;
   const candidates = choices.length ? choices : [""];
   for (let i = 0; i < candidates.length; i++) {
@@ -292,6 +320,7 @@ function productRowHtml(p) {
       break;
     }
   }
+  const awaitingChoice = choices.length > 0 && !selectedChoice;
 
   // Only ever request a photo that is a real web address (the ones uploaded
   // via the staff portal's Drive photo tool). Older leftover values in the
@@ -300,7 +329,7 @@ function productRowHtml(p) {
   // what was making the whole page look stuck on "Loading".
   const hasRealPhoto = /^https?:\/\//i.test(p.photo || "");
 
-  return `<div class="product-row${qty > 0 ? " has-qty" : ""}" data-idx="${p._i}" data-code="${escapeHtml(p.code)}">
+  return `<div class="product-row${qty > 0 ? " has-qty" : ""}${awaitingChoice ? " needs-choice" : ""}" data-idx="${p._i}" data-code="${escapeHtml(p.code)}">
       ${hasRealPhoto
         ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;product-thumb placeholder&quot;>no photo</div>'">`
         : `<div class="product-thumb placeholder">no photo</div>`}
@@ -310,7 +339,10 @@ function productRowHtml(p) {
       </div>
       <div class="opt-and-stepper">
         ${choices.length
-          ? `<select class="opt-select" data-act="choice">${choices.map(c => `<option value="${escapeHtml(c)}"${c === selectedChoice ? " selected" : ""}>${escapeHtml(c)}</option>`).join("")}</select>`
+          ? `<select class="opt-select" data-act="choice" data-prev="${escapeHtml(selectedChoice)}">`
+            + `<option value=""${selectedChoice ? "" : " selected"}>Choose…</option>`
+            + choices.map(c => `<option value="${escapeHtml(c)}"${c === selectedChoice ? " selected" : ""}>${escapeHtml(c)}</option>`).join("")
+            + `</select>`
           : `<span class="no-opt">—</span>`}
         <div class="stepper">
           <button type="button" class="minus" data-act="minus">–</button>
@@ -369,14 +401,62 @@ function applyRowQty(ctx, newQty) {
   syncRowQty(ctx);
 }
 
+/* True when this product offers options and none has been picked yet. Nothing
+   may be added in that state — see the comment in productRowHtml. */
+function rowAwaitsChoice(ctx) {
+  const select = ctx.row.querySelector(".opt-select");
+  return !!select && !select.value;
+}
+
+/* Points the customer at the dropdown instead of popping an alert. The row
+   highlights, the dropdown takes focus and opens where the browser allows it,
+   so the next tap is the choice itself. */
+function promptForChoice(ctx) {
+  const select = ctx.row.querySelector(".opt-select");
+  if (!select) return;
+  ctx.row.classList.add("needs-choice", "nudge");
+  select.focus();
+  if (typeof select.showPicker === "function") {
+    try { select.showPicker(); } catch (err) { /* not allowed without a gesture on some browsers */ }
+  }
+  setTimeout(() => ctx.row.classList.remove("nudge"), 1200);
+}
+
 function onProductListClick(e) {
   const button = e.target.closest("button[data-act]");
   if (!button) return;
   const ctx = rowContext(button);
   if (!ctx) return;
+  if (rowAwaitsChoice(ctx)) {
+    promptForChoice(ctx);
+    return;
+  }
   const line = CART.get(cartKey(ctx.product.code, ctx.choice));
   const current = line ? line.qty : 0;
   applyRowQty(ctx, button.dataset.act === "plus" ? current + 1 : current - 1);
+}
+
+/* Changing the option moves the quantity onto it rather than leaving a line
+   stranded under the old one.
+
+   Before this, switching UNCUT to CUT reset the box to 0 while the UNCUT line
+   stayed in the cart. The customer saw an empty row, assumed nothing had been
+   added, and received uncut cakes. */
+function moveCartChoice(product, fromChoice, toChoice) {
+  if (fromChoice === toChoice) return;
+  const fromKey = cartKey(product.code, fromChoice);
+  const existing = CART.get(fromKey);
+  if (!existing || !existing.qty) return;
+  const qty = existing.qty;
+  CART.delete(fromKey);
+  if (toChoice) {
+    // Routed through setCartQty so the decoration surcharge is re-asked when
+    // the new option is one that carries it.
+    setCartQty(product, toChoice, qty);
+  } else {
+    refreshCartUI();
+    schedulePricingRefresh();
+  }
 }
 
 function onProductListChange(e) {
@@ -384,8 +464,20 @@ function onProductListChange(e) {
   if (!el) return;
   const ctx = rowContext(el);
   if (!ctx) return;
-  if (el.dataset.act === "qty") applyRowQty(ctx, el.value);
-  else if (el.dataset.act === "choice") syncRowQty(ctx);
+  if (el.dataset.act === "qty") {
+    if (rowAwaitsChoice(ctx)) {
+      el.value = 0;            // don't let a typed quantity bypass the choice
+      promptForChoice(ctx);
+      return;
+    }
+    applyRowQty(ctx, el.value);
+  } else if (el.dataset.act === "choice") {
+    const previous = el.dataset.prev || "";
+    el.dataset.prev = el.value;
+    moveCartChoice(ctx.product, previous, el.value);
+    ctx.row.classList.toggle("needs-choice", !el.value);
+    syncRowQty(ctx);
+  }
 }
 
 /* ---------- cart ---------- */
@@ -717,7 +809,7 @@ function buildText() {
 
   CART.forEach((line, key) => {
     const pricing = LAST_PRICING.byKey[key] || { lineTotal: 0 };
-    text += `${line.qty} x ${line.name}${line.choice ? ` (${line.choice})` : ""}${line.addon ? ` - ${line.addon}` : ""} | ${formatMoney(pricing.lineTotal)}\n`;
+    text += `${line.qty}x ${line.code} ${summaryName(line.name)}${line.choice ? ` (${line.choice})` : ""}${line.addon ? ` - ${line.addon}` : ""}|${formatMoney(pricing.lineTotal)}\n`;
   });
 
   text += `\n-------------------------\nTOTAL PRICE (indicative): ${formatMoney(LAST_PRICING.total)}\n`;
