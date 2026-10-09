@@ -295,31 +295,51 @@ function getFilteredProducts() {
                  catalogue is swapped out by a background refresh between a
                  render and a tap, the codes won't line up and the tap is
                  ignored rather than quietly adding the wrong product. */
+/* Everything this product currently has in the cart, one entry per option.
+   A cake can be ordered as 2 uncut AND 3 cut at the same time, so a row can
+   stand for several cart lines, not one. */
+function productCartLines(p) {
+  const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
+  const out = [];
+  (choices.length ? choices : [""]).forEach(c => {
+    const line = CART.get(cartKey(p.code, c));
+    if (line && line.qty > 0) out.push({ choice: c, qty: line.qty });
+  });
+  return out;
+}
+
+/* The small "2 × UNCUT" tags under a row.
+
+   They exist because the dropdown can only show one option at a time. Without
+   them, switching from UNCUT to CUT makes the quantity box read 0 and the
+   uncut cakes vanish from view even though they are still on the order. The
+   tags keep every variant visible, and tapping one switches the row back to
+   it. */
+function cartChipsHtml(p) {
+  const lines = productCartLines(p);
+  if (!lines.length) return "";
+  return `<div class="row-chips">` + lines.map(l =>
+    `<button type="button" class="row-chip" data-act="chip" data-choice="${escapeHtml(l.choice)}">`
+    + `${l.qty} × ${escapeHtml(l.choice || "—")}</button>`
+  ).join("") + `</div>`;
+}
+
 function productRowHtml(p) {
   const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
 
-  /* Show the option this product is actually in the cart under, not just the
-     first one in the list. Without this, a cake added as "90 CUT" redraws as
-     "45 CUT" with a quantity of 0 the moment the list is re-rendered — on a
-     search, a category change, or a background catalogue refresh — and on the
-     staff Edit page a whole saved order looks empty. */
   /* Starts EMPTY for a product with options, not on the first one.
 
      Every option list in the sheet begins with "Uncut", so defaulting to the
      first entry meant tapping + quietly booked an uncut cake. The customer
      never made that choice — they just didn't touch a dropdown they had no
-     reason to think mattered — and found out when the delivery arrived. */
-  let selectedChoice = "";
-  let qty = 0;
-  const candidates = choices.length ? choices : [""];
-  for (let i = 0; i < candidates.length; i++) {
-    const line = CART.get(cartKey(p.code, candidates[i]));
-    if (line && line.qty > 0) {
-      selectedChoice = candidates[i];
-      qty = line.qty;
-      break;
-    }
-  }
+     reason to think mattered — and found out when the delivery arrived.
+
+     Once something IS in the cart the row opens on that option, so a
+     re-render (a search, a category change, a background refresh) doesn't
+     appear to lose it. */
+  const inCart = productCartLines(p);
+  const selectedChoice = inCart.length ? inCart[0].choice : "";
+  const qty = inCart.length ? inCart[0].qty : 0;
   const awaitingChoice = choices.length > 0 && !selectedChoice;
 
   // Only ever request a photo that is a real web address (the ones uploaded
@@ -336,10 +356,11 @@ function productRowHtml(p) {
       <div class="product-info">
         <div class="p-name">${escapeHtml(p.name || "(unnamed)")}</div>
         <div class="p-meta">${escapeHtml(p.code)}</div>
+        ${cartChipsHtml(p)}
       </div>
       <div class="opt-and-stepper">
         ${choices.length
-          ? `<select class="opt-select" data-act="choice" data-prev="${escapeHtml(selectedChoice)}">`
+          ? `<select class="opt-select" data-act="choice">`
             + `<option value=""${selectedChoice ? "" : " selected"}>Choose…</option>`
             + choices.map(c => `<option value="${escapeHtml(c)}"${c === selectedChoice ? " selected" : ""}>${escapeHtml(c)}</option>`).join("")
             + `</select>`
@@ -391,7 +412,22 @@ function syncRowQty(ctx) {
   const qty = line ? line.qty : 0;
   const input = ctx.row.querySelector(".qty-val");
   if (input) input.value = qty;
-  ctx.row.classList.toggle("has-qty", qty > 0);
+  // "has-qty" marks the whole product as ordered, in any of its options —
+  // not just the one the dropdown happens to be showing.
+  ctx.row.classList.toggle("has-qty", productCartLines(ctx.product).length > 0);
+  redrawRowChips(ctx);
+}
+
+/* Keeps the "2 × UNCUT" tags under a row in step with the cart, in place,
+   without rebuilding the row (which would drop the dropdown the customer is
+   mid-way through using). */
+function redrawRowChips(ctx) {
+  const info = ctx.row.querySelector(".product-info");
+  if (!info) return;
+  const existing = info.querySelector(".row-chips");
+  const html = cartChipsHtml(ctx.product);
+  if (existing) existing.remove();
+  if (html) info.insertAdjacentHTML("beforeend", html);
 }
 
 function applyRowQty(ctx, newQty) {
@@ -427,6 +463,12 @@ function onProductListClick(e) {
   if (!button) return;
   const ctx = rowContext(button);
   if (!ctx) return;
+  // Tapping "2 × UNCUT" jumps the row back to that variant so it can be
+  // adjusted, rather than being read-only decoration.
+  if (button.dataset.act === "chip") {
+    selectRowChoice(ctx, button.dataset.choice || "");
+    return;
+  }
   if (rowAwaitsChoice(ctx)) {
     promptForChoice(ctx);
     return;
@@ -436,27 +478,15 @@ function onProductListClick(e) {
   applyRowQty(ctx, button.dataset.act === "plus" ? current + 1 : current - 1);
 }
 
-/* Changing the option moves the quantity onto it rather than leaving a line
-   stranded under the old one.
-
-   Before this, switching UNCUT to CUT reset the box to 0 while the UNCUT line
-   stayed in the cart. The customer saw an empty row, assumed nothing had been
-   added, and received uncut cakes. */
-function moveCartChoice(product, fromChoice, toChoice) {
-  if (fromChoice === toChoice) return;
-  const fromKey = cartKey(product.code, fromChoice);
-  const existing = CART.get(fromKey);
-  if (!existing || !existing.qty) return;
-  const qty = existing.qty;
-  CART.delete(fromKey);
-  if (toChoice) {
-    // Routed through setCartQty so the decoration surcharge is re-asked when
-    // the new option is one that carries it.
-    setCartQty(product, toChoice, qty);
-  } else {
-    refreshCartUI();
-    schedulePricingRefresh();
-  }
+/* Points the row's dropdown at one option and shows that option's quantity.
+   Nothing is added, removed or moved — this only changes which of the
+   product's variants the stepper is currently editing. */
+function selectRowChoice(ctx, choice) {
+  const select = ctx.row.querySelector(".opt-select");
+  if (!select) return;
+  select.value = choice;
+  ctx.row.classList.toggle("needs-choice", !select.value);
+  syncRowQty({ row: ctx.row, product: ctx.product, choice: select.value });
 }
 
 function onProductListChange(e) {
@@ -472,11 +502,11 @@ function onProductListChange(e) {
     }
     applyRowQty(ctx, el.value);
   } else if (el.dataset.act === "choice") {
-    const previous = el.dataset.prev || "";
-    el.dataset.prev = el.value;
-    moveCartChoice(ctx.product, previous, el.value);
-    ctx.row.classList.toggle("needs-choice", !el.value);
-    syncRowQty(ctx);
+    /* Switching the option does NOT move anything. A customer can order the
+       same cake both cut and uncut, so each option keeps its own quantity and
+       the dropdown just chooses which one the stepper is editing. The tags
+       under the row show the others so none of them is hidden. */
+    selectRowChoice(ctx, el.value);
   }
 }
 
@@ -542,8 +572,8 @@ function renderOrderPanel() {
     html += `
       <div class="order-line">
         <div>
-          <div class="ol-name">${escapeHtml(line.name)}${line.choice ? ` (${escapeHtml(line.choice)})` : ""}</div>
-          <div class="ol-meta">${line.qty} × ${pricing ? formatMoney(pricing.unitPrice) : "…"}</div>
+          <div class="ol-name">${escapeHtml(line.name)}</div>
+          <div class="ol-meta">${line.qty} × ${pricing ? formatMoney(pricing.unitPrice) : "…"}${line.choice ? ` · <strong>${escapeHtml(line.choice)}</strong>` : ""}</div>
         </div>
         <span class="ol-amt">${amt}</span>
       </div>

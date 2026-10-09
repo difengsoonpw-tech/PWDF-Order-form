@@ -99,3 +99,15 @@
 @media (prefers-reduced-motion: no-preference) {
   .product-row.nudge { transition: outline-color 120ms ease-in; }
 }
+
+
+/* The "2 × UNCUT" tags under a product name. One per option that product has
+   in the cart, so a cake ordered both cut and uncut shows both — the dropdown
+   can only display one at a time. Tapping a tag switches the row to it. */
+.row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.row-chip {
+  font: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+  border: 1px solid var(--gold); background: #FFF6DC; color: #7A6B4D;
+  border-radius: 999px; padding: 2px 8px; cursor: pointer; white-space: nowrap;
+}
+.row-chip:hover { background: var(--gold); color: var(--cream); }
