@@ -324,6 +324,35 @@ function cartChipsHtml(p) {
   ).join("") + `</div>`;
 }
 
+/* The picture shown when a product has no photo (or its photo fails to load):
+   an emoji that matches what the product is, picked from its category and name,
+   so bread shows a loaf and cake shows a cake instead of a blank "no photo". */
+function placeholderIcon(p) {
+  const t = ((p.category || "") + " " + (p.name || "")).toUpperCase();
+  const rules = [
+    [/GINGERBREAD|BISCUIT|COOKIE/, "\u{1F36A}"],   // cookie
+    [/CHRISTMAS|XMAS|\bLOG\b/, "\u{1F384}"],       // christmas tree
+    [/MACARON/, "\u{1F36C}"],                       // candy
+    [/DONUT|DOUGHNUT/, "\u{1F369}"],                // doughnut
+    [/MUFFIN|CUPCAKE|CUP SERIES/, "\u{1F9C1}"],     // cupcake
+    [/PIZZA/, "\u{1F355}"],                         // pizza
+    [/TART|PIE/, "\u{1F967}"],                      // pie
+    [/PASTRY|CROISSANT|DANISH|SCONE/, "\u{1F950}"], // croissant
+    [/BREAD|BUN|LOAF|TOAST|MUFFIN|BAGUETTE/, "\u{1F35E}"], // bread
+    [/CAKE|BLOCK|SLAB|OPERA|PETITE/, "\u{1F382}"]   // birthday cake
+  ];
+  for (const [re, icon] of rules) if (re.test(t)) return icon;
+  return "\u{1F370}"; // shortcake, for anything else
+}
+
+/* Swaps a photo that failed to load for the same matching icon. */
+function photoFallback(img) {
+  const d = document.createElement("div");
+  d.className = "product-thumb placeholder";
+  d.innerHTML = '<span class="ph-icon">' + (img.dataset.ph || "\u{1F370}") + "</span>";
+  img.replaceWith(d);
+}
+
 function productRowHtml(p) {
   const choices = (p.choice || "").split("/").map(c => c.trim()).filter(Boolean);
 
@@ -351,8 +380,8 @@ function productRowHtml(p) {
 
   return `<div class="product-row${qty > 0 ? " has-qty" : ""}${awaitingChoice ? " needs-choice" : ""}" data-idx="${p._i}" data-code="${escapeHtml(p.code)}">
       ${hasRealPhoto
-        ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;product-thumb placeholder&quot;>no photo</div>'">`
-        : `<div class="product-thumb placeholder">no photo</div>`}
+        ? `<img class="product-thumb" src="${escapeHtml(p.photo)}" alt="" loading="lazy" data-ph="${placeholderIcon(p)}" onerror="photoFallback(this)">`
+        : `<div class="product-thumb placeholder"><span class="ph-icon">${placeholderIcon(p)}</span></div>`}
       <div class="product-info">
         <div class="p-name">${escapeHtml(p.name || "(unnamed)")}</div>
         <div class="p-meta">${escapeHtml(p.code)}</div>
