@@ -272,6 +272,18 @@ a { color: inherit; }
 .cart-line-controls { display: flex; align-items: center; gap: 6px; }
 .cart-line-controls input { width: 56px; padding: 6px; margin: 0; text-align: center; }
 .remove-line-btn { border: none; background: #f3d9d9; color: #a33; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+/* .popup-total-row sets display:flex, which would otherwise beat the hidden
+   attribute used to hide it in sample mode. */
+[hidden] { display: none !important; }
+/* Order / Sample switch at the top of the review popup. */
+.request-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 14px 0 12px; }
+.request-mode-label { font-size: 12.5px; font-weight: 700; color: var(--muted2); }
+.request-mode-seg { display: inline-flex; border: 1px solid #DDD2B8; border-radius: 999px; overflow: hidden; }
+.request-mode-seg button { border: 0; background: transparent; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 700; color: #7A6B4D; cursor: pointer; }
+.request-mode-seg button[aria-pressed="true"] { background: var(--dark); color: var(--cream); }
+.request-mode-seg button:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.sample-box { background: #EEF6EF; border-color: #CFE3D2; }
+.sample-qty { width: 56px; text-align: center; font-weight: 700; }
 .popup-total-row { display: flex; justify-content: space-between; font-weight: 700; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--cardline); }
 .popup-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .popup-buttons button {
@@ -384,20 +396,32 @@ a { color: inherit; }
     <div style="text-align:center;">
       <img src="logo.png" alt="Pastry World" style="max-width:130px; height:auto;" onerror="this.style.display='none'">
     </div>
-    <div class="policy-box">
+    <div class="request-mode" role="group" aria-label="What are you sending?">
+      <span class="request-mode-label">I want to send</span>
+      <div class="request-mode-seg">
+        <button type="button" id="modeOrder" aria-pressed="true" onclick="setRequestMode('order')">An order</button>
+        <button type="button" id="modeSample" aria-pressed="false" onclick="setRequestMode('sample')">A sample request</button>
+      </div>
+    </div>
+    <div class="policy-box" id="policyOrder">
       <strong>⚠ IMPORTANT:</strong>
       <p>This order is considered CONFIRMED upon submission.</p>
       <p>• Amendments are only allowed before the Sales Advisor confirms your order.</p>
       <p>• No changes are allowed after the order has been submitted.</p>
+    </div>
+    <div class="policy-box sample-box" id="policySample" hidden>
+      <strong>Sample request</strong>
+      <p>Samples are free and counted by the piece: 1 means one slice of a cake, one croissant, one tart.</p>
+      <p>• Our team will contact you to arrange your samples.</p>
     </div>
 
     <h3>Customer details</h3>
     <input id="customerName" placeholder="Customer Name">
     <input id="brandName" placeholder="Brand Name" autocomplete="off">
     <input id="contactNumber" placeholder="Contact Number">
-    <h3>Your order</h3>
+    <h3 id="popupListTitle">Your order</h3>
     <div id="popupSummary"></div>
-    <div class="popup-total-row">
+    <div class="popup-total-row" id="popupTotalRow">
       <span>Total (indicative)</span>
       <span id="popupTotal">RM 0.00</span>
     </div>
@@ -408,9 +432,9 @@ a { color: inherit; }
           <path d="M20.52 3.48A11.86 11.86 0 0012 0C5.37 0 .04 5.33.04 11.96c0 2.11.55 4.18 1.6 6.02L0 24l6.29-1.63A11.9 11.9 0 0012 23.92c6.63 0 11.96-5.33 11.96-11.96 0-3.2-1.24-6.2-3.44-8.48z" fill="#25D366"/>
           <path d="M17.3 14.1c-.3-.15-1.78-.88-2.06-.98-.28-.1-.48-.15-.68.15-.17.28-.66.98-.81 1.18-.15.2-.3.22-.57.07-.3-.15-1.27-.47-2.42-1.48-.9-.8-1.5-1.8-1.68-2.09-.18-.28-.02-.43.13-.57.13-.12.3-.3.45-.45.15-.15.2-.25.3-.42.1-.17.05-.33-.02-.48-.07-.15-.68-1.64-.93-2.24-.24-.58-.49-.5-.68-.51l-.58-.01c-.2 0-.52.07-.8.33-.28.26-1.06 1.04-1.06 2.53 0 1.5 1.09 2.95 1.24 3.15.15.2 2.14 3.45 5.2 4.83 3.06 1.38 3.06.92 3.62.86.56-.07 1.79-.73 2.04-1.44.25-.71.25-1.32.18-1.44-.08-.12-.28-.17-.58-.32z" fill="#fff"/>
         </svg>
-        Send via WhatsApp
+        <span id="waLabel">Send via WhatsApp</span>
       </button>
-      <button class="btn-email" onclick="submitEmail()">Send via Email</button>
+      <button class="btn-email" onclick="submitEmail()"><span id="emailLabel">Send via Email</span></button>
       <button class="btn-close" onclick="closeSummary()">Close</button>
     </div>
   </div>
@@ -425,6 +449,6 @@ a { color: inherit; }
 
 <script src="google.js?v=6"></script>
 <script src="order.js?v=6"></script>
-<script src="script.js.js?v=6"></script>
+<script src="script.js.js?v=7"></script>
 </body>
 </html>

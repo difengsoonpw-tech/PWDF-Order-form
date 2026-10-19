@@ -40,6 +40,47 @@ let CART = new Map();       // key `${code}::${choice}` -> {code,name,category,c
 let CURRENT_CATEGORY = "";  // "" = All products
 let CURRENT_SEARCH = "";
 let CURRENT_ORDER_REF = null;
+
+/* "order" or "sample", chosen with the switch at the top of the review popup.
+
+   A sample request uses the same cart as an order, but the quantities are read
+   as PIECES (one slice, one croissant), no prices are shown or sent, and the
+   message lists only quantity, item code and item name. Every line saved to the
+   Sheet is marked "SAMPLE (pcs)" in its Remark, so a sample can't be mistaken
+   for a normal order by anyone reading the Sheet or the Operations email. */
+let REQUEST_MODE = "order";
+const SAMPLE_REMARK = "SAMPLE (pcs)";
+const SAMPLE_NOTE = "SAMPLE REQUEST - counted by piece";
+
+/* The cart as sample lines: one per product code. A cake added both cut and
+   uncut becomes a single line, because a sample piece is a piece — the cut
+   option doesn't apply. Keeps the order products were first added in. */
+function sampleLines() {
+  const byCode = new Map();
+  CART.forEach(line => {
+    const existing = byCode.get(line.code);
+    if (existing) existing.qty += line.qty;
+    else byCode.set(line.code, { code: line.code, name: line.name, category: line.category || "", qty: line.qty });
+  });
+  return Array.from(byCode.values());
+}
+
+/* Flips the review popup between Order and Sample. Every element is looked up
+   defensively: the staff Edit page shares this file but has no switch. */
+function setRequestMode(mode) {
+  REQUEST_MODE = mode === "sample" ? "sample" : "order";
+  const isSample = REQUEST_MODE === "sample";
+  const el = id => document.getElementById(id);
+  if (el("modeOrder")) el("modeOrder").setAttribute("aria-pressed", String(!isSample));
+  if (el("modeSample")) el("modeSample").setAttribute("aria-pressed", String(isSample));
+  if (el("policyOrder")) el("policyOrder").hidden = isSample;
+  if (el("policySample")) el("policySample").hidden = !isSample;
+  if (el("popupListTitle")) el("popupListTitle").textContent = isSample ? "Your sample (pieces)" : "Your order";
+  if (el("popupTotalRow")) el("popupTotalRow").hidden = isSample;
+  if (el("waLabel")) el("waLabel").textContent = isSample ? "Send sample via WhatsApp" : "Send via WhatsApp";
+  if (el("emailLabel")) el("emailLabel").textContent = isSample ? "Send sample via Email" : "Send via Email";
+  if (summaryPopup && summaryPopup.style.display === "flex") renderPopupCart();
+}
 let LAST_PRICING = { total: 0, byKey: {}, partial: false }; // key -> {unitPrice, lineTotal}
 let pricingDebounceHandle = null;
 
@@ -802,6 +843,10 @@ function renderPopupCart() {
     popupTotal.textContent = formatMoney(0);
     return;
   }
+  if (REQUEST_MODE === "sample") {
+    renderSamplePopup();
+    return;
+  }
   let html = "";
   CART.forEach((line, key) => {
     const pricing = LAST_PRICING.byKey[key] || { unitPrice: 0, lineTotal: 0 };
@@ -846,6 +891,56 @@ function renderPopupCart() {
   });
 }
 
+/* Sample view of the popup: pieces, item name and code, no prices.
+   A product that is in the cart under one option can have its pieces changed
+   here; one held under several options (cut and uncut) shows its combined
+   count, and is adjusted from the product list. */
+function renderSamplePopup() {
+  const lines = sampleLines();
+  const variantsOf = code => Array.from(CART.keys()).filter(k => CART.get(k).code === code);
+  popupSummary.innerHTML = lines.map(l => {
+    const single = variantsOf(l.code).length === 1;
+    return `
+      <div class="cart-line sample-line" data-code="${escapeHtml(l.code)}">
+        <div>
+          <div class="cl-name">${escapeHtml(summaryName(l.name))}</div>
+          <div class="cl-meta">${escapeHtml(l.code)}</div>
+        </div>
+        <div class="cart-line-controls">
+          ${single
+            ? `<input type="number" min="1" value="${l.qty}" class="popup-qty" aria-label="Pieces">`
+            : `<span class="sample-qty">${l.qty}</span>`}
+          <span class="cl-amt">pcs</span>
+          <button type="button" class="remove-line-btn">Remove</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  popupSummary.querySelectorAll(".sample-line").forEach(el => {
+    const code = el.dataset.code;
+    const keys = variantsOf(code);
+    const qtyInput = el.querySelector(".popup-qty");
+    if (qtyInput) {
+      qtyInput.addEventListener("change", e => {
+        const line = CART.get(keys[0]);
+        if (!line) return;
+        line.qty = Math.max(1, Math.floor(Number(e.target.value) || 1));
+        refreshCartUI();
+        schedulePricingRefresh();
+        renderPopupCart();
+        renderProductList();
+      });
+    }
+    el.querySelector(".remove-line-btn").addEventListener("click", () => {
+      keys.forEach(k => CART.delete(k));
+      refreshCartUI();
+      schedulePricingRefresh();
+      renderProductList();
+      renderPopupCart();
+    });
+  });
+}
+
 function closeSummary() {
   summaryPopup.style.display = "none";
   document.body.style.overflow = "auto";
@@ -857,6 +952,7 @@ function buildText() {
     alert("Please fill in Customer Name, Brand Name and Contact Number.");
     return null;
   }
+  if (REQUEST_MODE === "sample") return buildSampleText();
   // Never write a total into the order text while a line is still unpriced.
   if (LAST_PRICING.partial) {
     alert("We couldn't get the prices for your order just now.\nPlease check your connection and try again.");
@@ -877,22 +973,42 @@ function buildText() {
   return text;
 }
 
+/* The sample message: quantity in pieces, item code, item name. No prices,
+   no cut option, and clearly headed so nobody prepares it as an order. */
+function buildSampleText() {
+  CURRENT_ORDER_REF = CURRENT_ORDER_REF || generateOrderRef();
+  const lines = sampleLines();
+  let text = `SAMPLE REQUEST\n\nRef: ${CURRENT_ORDER_REF}\n\nCustomer: ${customerName.value}\nBrand: ${brandName.value}\nContact: ${contactNumber.value}\n\nITEMS (pieces):\n`;
+  lines.forEach(l => { text += `${l.qty}pc ${l.code} ${summaryName(l.name)}\n`; });
+  const pieces = lines.reduce((sum, l) => sum + l.qty, 0);
+  text += `\nTotal: ${pieces} piece${pieces === 1 ? "" : "s"}, ${lines.length} product${lines.length === 1 ? "" : "s"}\n`;
+  text += `\n📌 Our team will contact you to arrange your samples.\n`;
+  return text;
+}
+
 async function saveOrderToGoogleSheet() {
   const orderRef = CURRENT_ORDER_REF || generateOrderRef();
   CURRENT_ORDER_REF = orderRef;
 
+  const isSample = REQUEST_MODE === "sample";
   const items = [];
-  CART.forEach(line => {
-    items.push({
-      code: line.code,
-      name: line.name,
-      qty: line.qty,
-      remark: `${line.choice || ""} ${line.addon || ""}`.trim(),
-      choice: line.choice || "",
-      addon: line.addon || "",
-      category: line.category || ""
+  if (isSample) {
+    sampleLines().forEach(l => {
+      items.push({ code: l.code, name: l.name, qty: l.qty, remark: SAMPLE_REMARK, choice: "", addon: "", category: l.category });
     });
-  });
+  } else {
+    CART.forEach(line => {
+      items.push({
+        code: line.code,
+        name: line.name,
+        qty: line.qty,
+        remark: `${line.choice || ""} ${line.addon || ""}`.trim(),
+        choice: line.choice || "",
+        addon: line.addon || "",
+        category: line.category || ""
+      });
+    });
+  }
 
   const payload = {
     orderRef,
@@ -902,6 +1018,7 @@ async function saveOrderToGoogleSheet() {
     status: "Draft",
     orderJson: JSON.stringify(items),
     items,
+    notes: isSample ? SAMPLE_NOTE : "",
     createdDate: new Date().toISOString(),
     updatedDate: new Date().toISOString()
   };
@@ -915,22 +1032,24 @@ async function saveOrderToGoogleSheet() {
 }
 
 async function submitEmail() {
-  await ensurePricingCurrent();
+  const isSample = REQUEST_MODE === "sample";
+  if (!isSample) await ensurePricingCurrent();
   const t = buildText();
   if (!t) return;
   try {
     await saveOrderToGoogleSheet();
-    alert("Order saved successfully.");
+    alert(isSample ? "Sample request saved successfully." : "Order saved successfully.");
   } catch (err) {
     console.error(err);
-    alert("Failed to save order: " + (err.message || err));
+    alert((isSample ? "Failed to save sample request: " : "Failed to save order: ") + (err.message || err));
     return;
   }
-  location.href = `mailto:?subject=New Order&body=${encodeURIComponent(t)}`;
+  location.href = `mailto:?subject=${isSample ? "Sample Request" : "New Order"}&body=${encodeURIComponent(t)}`;
 }
 
 async function submitWhatsApp() {
-  await ensurePricingCurrent();
+  const isSample = REQUEST_MODE === "sample";
+  if (!isSample) await ensurePricingCurrent();
   const t = buildText();
   if (!t) return;
 
@@ -939,10 +1058,10 @@ async function submitWhatsApp() {
 
   try {
     await saveOrderToGoogleSheet();
-    alert("Order saved successfully.");
+    alert(isSample ? "Sample request saved successfully." : "Order saved successfully.");
   } catch (err) {
     console.error(err);
-    alert("Order sent to WhatsApp but failed to save.");
+    alert(isSample ? "Sample request sent to WhatsApp but failed to save." : "Order sent to WhatsApp but failed to save.");
   }
 }
 
